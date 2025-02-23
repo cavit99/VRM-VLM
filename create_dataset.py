@@ -6,6 +6,9 @@ import datetime
 # Folder where your images are located
 GENERATED_FOLDER = 'generated'
 
+# Replace 'your_username/uk_plate_dataset' with your actual repository name.
+repo_name = "spawn99/UK-Car-Plate-VRN-Dataset"
+
 # List to store our dataset rows
 rows = []
 
@@ -80,9 +83,12 @@ where:
 ### Data Collection Method
 Images are collected from the 'generated' folder. Each image is processed to extract the VRN and plate type information from the filename.
 
+The code used to generate this synthetic dataset is available at: https://github.com/cavit99/VRM-VLM
+
 ### Dataset Statistics
 7500 Unique VRNs as both front and rear plates each
 15,000 total images
+
 
 ### License
 MIT License
@@ -120,8 +126,6 @@ with open("README.md", "w") as f:
     f.write(readme_content)
 
 # Push the dataset to the Hugging Face Hub:
-# Replace 'your_username/uk_plate_dataset' with your actual repository name.
-repo_name = "spawn99/UK-Car-Plate-VRN-Dataset"
 ds.push_to_hub(repo_name, private=False)
 
 print(f"Dataset pushed to: https://huggingface.co/datasets/{repo_name}") 
