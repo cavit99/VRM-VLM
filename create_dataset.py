@@ -66,7 +66,7 @@ readme_content = """# UK Car Plate VRN Dataset
 This dataset contains images of UK car license plates (Vehicle Registration Numbers - VRNs) with their corresponding plate types (front/rear).
 
 ### Dataset Creation Date
-23 February 2025
+{}
 
 ### Dataset Structure
 - **file_name**: Name of the image file
@@ -86,8 +86,7 @@ Images are collected from the 'generated' folder. Each image is processed to ext
 The code used to generate this synthetic dataset is available at: https://github.com/cavit99/VRM-VLM
 
 ### Dataset Statistics
-7500 Unique VRNs as both front and rear plates each
-15,000 total images
+{} total images
 
 
 ### License
