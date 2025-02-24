@@ -145,7 +145,6 @@ def main():
             attn_implementation="eager"
         )
     
-    logger.info(f"Model layer type pre freeze: {type(model.decoder.layers[0])}")
 
     for param in model.vision_tower.parameters():
         param.requires_grad = False
