@@ -20,12 +20,33 @@ class CustomTrainer(Trainer):
             {"params": self.model.language_model.parameters(), "lr": 2.5e-5},
         ])
 
+# Move collate_fn outside of main() to make it pickleable
+def collate_fn(examples, processor, device, dtype):
+    texts = ["<image>ocr\n" for _ in examples]
+    labels = [example["label"] for example in examples]
+    images = []
+    for example in examples:
+        img = example["image"]
+        if isinstance(img, str):
+            img = Image.open(img)
+        images.append(img.convert("RGB"))
+    tokens = processor(
+        text=texts,
+        images=images,
+        suffix=labels,
+        return_tensors="pt",
+        padding="longest"
+    )
+    tokens = tokens.to(dtype).to(device)
+    return tokens
+
 def main():
     # Memory and CUDA optimizations
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if device == "cuda":
         torch.backends.cudnn.benchmark = True
         torch.cuda.empty_cache()
+        torch.set_float32_matmul_precision('high')  # Enable TF32 for better performance
 
     # Reduce batch size to help with memory issues
     BATCH_SIZE = 8  
@@ -220,7 +241,7 @@ def main():
         model=model,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        data_collator=collate_fn,
+        data_collator=lambda examples: collate_fn(examples, processor, device, DTYPE),
         args=training_args,
     )
 
