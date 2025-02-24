@@ -41,10 +41,10 @@ def main():
     # Simplified device setup for single GPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Basic configurations
-    BATCH_SIZE = 2
+    # Adjusted configurations for better memory usage
+    BATCH_SIZE = 4  # Increased from 2 since GPU has capacity
     num_epochs = 20
-    gradient_accumulation_steps = 1
+    gradient_accumulation_steps = 2  # Increased to help with larger batch size
 
     # 1. Load the dataset from the Hub.
     # The dataset was previously created with create_dataset.py.
@@ -133,13 +133,14 @@ def main():
     logger.info(f"Validation dataset size: {len(val_ds)}")
     logger.info(f"Test dataset size: {len(test_ds)}")
 
-    # 4. Load the model and processor
+    # 4. Load the model and processor with eager attention
     model_id = "google/paligemma2-3b-pt-448"
     processor = PaliGemmaProcessor.from_pretrained(model_id)
     
     model = PaliGemmaForConditionalGeneration.from_pretrained(
         model_id,
-        torch_dtype=torch.bfloat16
+        torch_dtype=torch.bfloat16,
+        attn_implementation='eager'  # Added eager attention
     ).to(device)
 
 
@@ -160,10 +161,10 @@ def main():
         per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,
-        learning_rate=1e-5,  
+        learning_rate=2.5e-5,  # Slightly increased learning rate
         weight_decay=0.01,
         logging_steps=200,    
-        save_strategy="epoch",  
+        save_strategy="epoch",
         save_total_limit=3,
         output_dir="Paligemma2-3B-448-UK-Car-VRN",
         max_grad_norm=1.0,
@@ -171,21 +172,17 @@ def main():
         report_to=["wandb"],
         run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
-        eval_steps=200,      # More frequent evaluation
+        eval_steps=200,
         dataloader_pin_memory=True,
         lr_scheduler_type="cosine",
         gradient_checkpointing=True,
         group_by_length=False,
+        # Added memory optimizations
+        optim="adamw_torch_fused",  # Use fused optimizer
+        fp16_full_eval=True  # Memory efficient evaluation
     )
 
-    # 7. Initialize the Trainer with a custom compute_loss method
-    class CustomTrainer(Trainer):
-        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-            outputs = model(**inputs)
-            loss = outputs.loss
-            return (loss, outputs) if return_outputs else loss
-
-    trainer = CustomTrainer(
+    trainer = Trainer(
         model=model,
         train_dataset=train_ds,
         eval_dataset=val_ds,
