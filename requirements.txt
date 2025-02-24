@@ -4,3 +4,5 @@ opencv-python
 transformers
 datasets
 torch
+wandb
+accelerate
