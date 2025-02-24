@@ -214,8 +214,8 @@ def main():
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
         num_train_epochs=3,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
+        per_device_train_batch_size=7,
+        per_device_eval_batch_size=4,
         gradient_accumulation_steps=1,
         eval_strategy="steps",
         save_strategy="steps",
