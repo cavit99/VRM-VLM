@@ -44,7 +44,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # Adjusted configurations for better GPU utilization
-    BATCH_SIZE = 6  # Increased from 4 to utilize more GPU memory
+    BATCH_SIZE = 5  # Increased from 4 to utilize more GPU memory
     num_epochs = 10
     gradient_accumulation_steps = 1  # Reduced since we increased batch size
 
@@ -159,18 +159,19 @@ def main():
     num_training_steps = (len(train_ds) // (BATCH_SIZE * gradient_accumulation_steps)) * num_epochs
     warmup_steps = num_training_steps // 15
 
-    # Calculate steps for evenly spaced saves and evaluations
+    # Calculate steps for saves and evaluations
     save_steps = num_training_steps // 10  # 10 saves total
-    eval_steps = save_steps  # Evaluate at the same frequency as saving
+    eval_steps = save_steps // 2  # Evaluate twice as frequently as saving
     
     logger.info(f"Total training steps: {num_training_steps}")
-    logger.info(f"Saving and evaluating every {save_steps} steps")
+    logger.info(f"Saving every {save_steps} steps")
+    logger.info(f"Evaluating every {eval_steps} steps")
 
     training_args = TrainingArguments(
         num_train_epochs=num_epochs,
         remove_unused_columns=False,
         per_device_train_batch_size=BATCH_SIZE,
-        per_device_eval_batch_size=BATCH_SIZE * 2,
+        per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,
         learning_rate=2e-5,
@@ -195,6 +196,7 @@ def main():
         load_best_model_at_end=True,
         metric_for_best_model="accuracy",
         greater_is_better=True,
+        eval_accumulation_steps=2,
     )
 
     # Define a custom compute_metrics function to track evaluation metrics
