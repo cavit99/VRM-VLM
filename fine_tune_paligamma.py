@@ -21,8 +21,6 @@ import datetime
 logging.set_verbosity_info()
 logger = logging.get_logger(__name__)
 
-# Removed the custom trainer with layer-specific learning rates.
-# We now rely on the default optimizer creation (AdamW) from Trainer.
 
 # Move both collate functions outside of main() to make them pickleable
 def collate_fn(examples, processor, device, dtype):
@@ -100,8 +98,14 @@ def main():
     # It has 7500 rows with augmented images in the columns:
     # "augmented_front_plate" and "augmented_rear_plate", and the registration number in "vrn".
     ds = load_dataset("spawn99/UK-Car-Plate-VRN-Dataset", split="train")
-    
-    # 2. Convert each row into two examples (one per augmented image).
+
+    # 2. Cast the image columns to Image type.  This decodes them into PIL Images.
+    ds = ds.cast_column("front_plate", Image())
+    ds = ds.cast_column("rear_plate", Image())
+    ds = ds.cast_column("augmented_front_plate", Image())
+    ds = ds.cast_column("augmented_rear_plate", Image())
+
+    # 3. Convert each row into two examples (one per augmented image).
     def split_augmented(example):
         return [
             {"image": img, "label": example["vrn"]}
@@ -116,7 +120,7 @@ def main():
     flattened_data = []
     for example in ds:
         flattened_data.extend(split_augmented(example))
-    
+
     ds_aug = Dataset.from_dict({
         "image": [x["image"] for x in flattened_data],
         "label": [x["label"] for x in flattened_data]
@@ -172,22 +176,6 @@ def main():
     logger.info(f"Train dataset size: {len(train_ds)}")
     logger.info(f"Validation dataset size: {len(val_ds)}")
     logger.info(f"Test dataset size: {len(test_ds)}")
-    
-    # Pre-process images before training
-    logger.info("Pre-processing training images...")
-    train_ds = train_ds.map(
-        lambda x: {"image": x["image"].convert("RGB") if isinstance(x["image"], str) else x["image"]}, 
-        load_from_cache_file=False
-    )
-    logger.info("Pre-processing validation images...")
-    val_ds = val_ds.map(
-        lambda x: {"image": x["image"].convert("RGB") if isinstance(x["image"], str) else x["image"]}, 
-        load_from_cache_file=False
-    )
-    test_ds = test_ds.map(
-        lambda x: {"image": x["image"].convert("RGB") if isinstance(x["image"], str) else x["image"]}, 
-        load_from_cache_file=False
-    )
 
     # 4. Load the model and processor
     model_id = "google/paligemma2-3b-pt-448"
@@ -229,6 +217,7 @@ def main():
         per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,  
+        learning_rate=2e-5, 
         weight_decay=1e-6,
         adam_beta2=0.999,
         logging_steps=100,
