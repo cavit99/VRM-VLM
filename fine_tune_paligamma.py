@@ -192,37 +192,33 @@ def main():
         per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,
-        learning_rate=5e-6,  # Reduced from 2e-5 for more stable fine-tuning
-        weight_decay=0.01,   # Increased for better regularization
-        adam_beta2=0.999,
-        logging_steps=100,
-        save_strategy="steps",
-        save_steps=1000,
+        learning_rate=1e-5,  # Increase from 5e-6 for faster learning
+        weight_decay=0.01,
+        logging_steps=200,    # Log more frequently
+        save_strategy="epoch",  # Simplified saving strategy
         save_total_limit=3,
         output_dir="Paligemma2-3B-448-UK-Car-VRN",
         max_grad_norm=1.0,
-        label_smoothing_factor=0.1,
         bf16=True,
         report_to=["wandb"],
         run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
-        eval_steps=500,
+        eval_steps=200,      # More frequent evaluation
         dataloader_pin_memory=True,
         lr_scheduler_type="cosine",
         dataloader_num_workers=num_workers,
-        dataloader_drop_last=True,
         gradient_checkpointing=True,
-        # Added parameters for better training stability
-        fp16_full_eval=False,          # Avoid potential precision issues during evaluation
-        group_by_length=True,          # Reduces padding, improves efficiency
-        prediction_loss_only=True,     # Focus on training loss for this task
-        load_best_model_at_end=True,   # Load best checkpoint at end of training
-        metric_for_best_model="loss",  # Use loss as metric for best model
-        greater_is_better=False,       # Lower loss is better
+        group_by_length=False,
     )
 
-    # 7. Initialize the Trainer with training and evaluation datasets.
-    trainer = Trainer(
+    # 7. Initialize the Trainer with a custom compute_loss method
+    class CustomTrainer(Trainer):
+        def compute_loss(self, model, inputs, return_outputs=False):
+            outputs = model(**inputs)
+            loss = outputs.loss
+            return (loss, outputs) if return_outputs else loss
+
+    trainer = CustomTrainer(
         model=model,
         train_dataset=train_ds,
         eval_dataset=val_ds,
