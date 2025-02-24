@@ -12,6 +12,7 @@ from transformers import (
     PaliGemmaForConditionalGeneration,
     TrainingArguments,
     Trainer,
+    BitsAndBytesConfig
 )
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,7 @@ def main():
     CONFIG = {
         "model_id": "google/paligemma2-3b-pt-448",
         "batch_size": 4,
-        "num_epochs": 10,
+        "num_epochs": 5,
         "learning_rate": 1e-5,
         "lora_rank": 8,
         "lora_dropout": 0.1,
@@ -117,11 +118,11 @@ def main():
     
     # Initialize model and processor
     processor = PaliGemmaProcessor.from_pretrained(CONFIG["model_id"])
-    model = PaliGemmaForConditionalGeneration.from_pretrained(
-        CONFIG["model_id"],
-        torch_dtype=torch.bfloat16,
-        attn_implementation='eager'
-    ).to(device)
+
+    bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16)
+
+    model = PaliGemmaForConditionalGeneration.from_pretrained(CONFIG["model_id"], device_map="auto", quantization_config=bnb_config)
+    
 
     # Setup LoRA
     lora_config = LoraConfig(
@@ -159,33 +160,32 @@ def main():
     logger.info(f"Evaluating every {eval_steps} steps")
 
     training_args = TrainingArguments(
-        num_train_epochs=CONFIG["num_epochs"],
-        remove_unused_columns=False,
-        warmup_steps=warmup_steps,
-        learning_rate=LEARNING_RATE,  
-        weight_decay=1e-6,
-        logging_steps=eval_steps,
-        save_strategy="steps",
-        save_steps=save_steps,
-        save_total_limit=10,
-        output_dir=CONFIG["output_dir"],
-        max_grad_norm=1.0,
-        adam_beta2=0.999,
-        bf16=True,
-        report_to=["wandb"],
-        run_name=f"paligemma-vrn-{run_id}",
-        eval_strategy="steps",
-        eval_steps=eval_steps,
-        dataloader_pin_memory=False,
-        lr_scheduler_type="cosine",
-        optim="adamw_torch",
-        dataloader_num_workers=4,
-        load_best_model_at_end=True,
-        metric_for_best_model="sequence_accuracy",
-        greater_is_better=True,
-        per_device_train_batch_size=CONFIG["batch_size"],
-        per_device_eval_batch_size=CONFIG["batch_size"],
-        eval_accumulation_steps=4  
+num_train_epochs=CONFIG["num_epochs"],
+    remove_unused_columns=False,
+    warmup_steps=warmup_steps,
+    learning_rate=LEARNING_RATE,
+    weight_decay=1e-5,
+    logging_steps=eval_steps,
+    save_strategy="steps",
+    save_steps=save_steps,
+    save_total_limit=5,
+    output_dir=CONFIG["output_dir"],
+    max_grad_norm=1.0,
+    bf16=True,
+    report_to=["wandb"],
+    run_name=f"paligemma-vrn-{run_id}",
+    eval_strategy="steps",
+    eval_steps=eval_steps,
+    dataloader_pin_memory=False,
+    lr_scheduler_type="cosine",
+    optim="paged_adamw_8bit", 
+    dataloader_num_workers=4,
+    load_best_model_at_end=True,
+    metric_for_best_model="sequence_accuracy",
+    greater_is_better=True,
+    per_device_train_batch_size=4,  
+    per_device_eval_batch_size=4,   
+    eval_accumulation_steps=4
     )
 
      # Define a custom compute_metrics function to track evaluation metrics
