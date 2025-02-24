@@ -20,7 +20,7 @@ class CustomTrainer(Trainer):
             {"params": self.model.language_model.parameters(), "lr": 2.5e-5},
         ])
 
-# Move collate_fn outside of main() to make it pickleable
+# Move both collate functions outside of main() to make them pickleable
 def collate_fn(examples, processor, device, dtype):
     texts = ["<image>ocr\n" for _ in examples]
     labels = [example["label"] for example in examples]
@@ -39,6 +39,15 @@ def collate_fn(examples, processor, device, dtype):
     )
     tokens = tokens.to(dtype).to(device)
     return tokens
+
+class CollateWrapper:
+    def __init__(self, processor, device, dtype):
+        self.processor = processor
+        self.device = device
+        self.dtype = dtype
+    
+    def __call__(self, examples):
+        return collate_fn(examples, self.processor, self.device, self.dtype)
 
 def main():
     # Memory and CUDA optimizations
@@ -241,7 +250,7 @@ def main():
         model=model,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        data_collator=lambda examples: collate_fn(examples, processor, device, DTYPE),
+        data_collator=CollateWrapper(processor, device, DTYPE),
         args=training_args,
     )
 
