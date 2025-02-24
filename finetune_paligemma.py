@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import uuid
+import gc
 from datasets import load_dataset, Dataset
 from transformers import Trainer, TrainingArguments, PaliGemmaProcessor, PaliGemmaForConditionalGeneration
 from peft import get_peft_model, LoraConfig
@@ -65,8 +66,8 @@ def load_and_prepare_dataset(subset_ratio=1.0):
 def collate_fn(batch):
     # Batch contains dictionaries with "image", "prompt", and "target" keys
     images = [item["image"] for item in batch]
-    prefixes = [f"<image>{item['prompt']}" for item in batch]  # Add the image token to the prompt
-    suffixes = [item["target"] for item in batch]  # Use the target as the suffix
+    prefixes = [f"<image>{item['prompt']}" for item in batch]  
+    suffixes = [item["target"] for item in batch]  
 
     # Process the inputs using the processor
     inputs = processor(
@@ -96,6 +97,54 @@ def compute_metrics(eval_preds):
     exact_matches = [pred.strip() == label.strip() for pred, label in zip(decoded_preds, decoded_labels)]
     accuracy = np.mean(exact_matches)
     return {"exact_match_accuracy": accuracy}
+
+def run_inference(model, processor, test_samples):
+    """
+    Runs inference on a few test samples to verify the model's performance.
+    
+    Parameters:
+        model: The fine-tuned model
+        processor: The model's processor
+        test_samples: List of samples to run inference on
+    """
+    model.eval()
+    results = []
+    
+    with torch.no_grad():
+        for sample in test_samples:
+            # Prepare inputs
+            inputs = processor(
+                text=f"<image>{sample['prompt']}", 
+                images=sample["image"],
+                return_tensors="pt"
+            )
+            
+            # Move inputs to the same device as the model
+            inputs = {k: v.to(model.device) for k, v in inputs.items()}
+            
+            # Generate output
+            output_ids = model.generate(
+                **inputs,
+                max_length=20,
+                num_beams=2,
+                early_stopping=True
+            )
+            
+            # Decode the output
+            predicted_text = processor.tokenizer.decode(output_ids[0], skip_special_tokens=True)
+            
+            # Compare with target
+            results.append({
+                "target": sample["target"],
+                "prediction": predicted_text,
+                "correct": predicted_text.strip() == sample["target"].strip()
+            })
+            
+            # Clear GPU memory
+            del inputs, output_ids
+            torch.cuda.empty_cache()
+    
+    return results
 
 def main():
     global processor
@@ -167,7 +216,7 @@ def main():
         num_train_epochs=3,
         per_device_train_batch_size=1,
         per_device_eval_batch_size=1,
-        gradient_accumulation_steps=12,
+        gradient_accumulation_steps=8,
         eval_strategy="steps",
         save_strategy="steps",
         eval_steps=20,
@@ -182,11 +231,11 @@ def main():
         run_name=f"paligemma-vrn-{str(uuid.uuid4())[:8]}",
         save_total_limit=1,
         remove_unused_columns=False,
-        bf16=True,  # Changed from bf16=True to ensure consistent precision
+        bf16=True,  
         label_names=["labels"],
         dataloader_pin_memory=False,
         dataloader_num_workers=2,
-        eval_accumulation_steps=4,    # Process evaluation predictions in smaller chunks
+        eval_accumulation_steps=2,    
     )
     
     # -------------------------------------------------------
@@ -207,30 +256,68 @@ def main():
     trainer.train()
     
     # -------------------------------------------------------
-    # For final evaluation, do it in smaller batches with controlled memory usage
-    # -------------------------------------------------------
-    print("Final evaluation on validation set:")
-    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-        eval_results = trainer.evaluate(max_length=20, num_beams=1)
-    print("Validation Results:", eval_results)
-    
-    print("Final evaluation on test set:")
-    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-        test_results = trainer.evaluate(test_ds, max_length=20, num_beams=1)
-    print("Test Results:", test_results)
-    
-    # -------------------------------------------------------
     # Save the final trained model and processor.
     # -------------------------------------------------------
     trainer.save_model(OUTPUT_DIR)
     processor.save_pretrained(OUTPUT_DIR)
+    print(f"Model and processor saved to: {OUTPUT_DIR}")
     
     # -------------------------------------------------------
-    # Push the final model and processor to the Hugging Face Hub.
+    # For final evaluation, do it in smaller batches with controlled memory usage
+    # -------------------------------------------------------
+    try:
+        print("Final evaluation on validation set:")
+        # Clear memory before evaluation
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            eval_results = trainer.evaluate(eval_dataset=valid_ds, max_length=20, num_beams=1)
+        print("Validation Results:", eval_results)
+        
+        # Clear memory between evaluations
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+        print("Final evaluation on test set:")
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            test_results = trainer.evaluate(eval_dataset=test_ds, max_length=20, num_beams=1)
+        print("Test Results:", test_results)
+    except Exception as e:
+        print(f"Error during evaluation: {e}")
+    
+    # -------------------------------------------------------
+    # Run direct inference on a few samples to verify model outputs
+    # -------------------------------------------------------
+    print("\nRunning inference on a few test samples:")
+    # Select a few samples for inference
+    inference_samples = test_ds.select(range(min(5, len(test_ds))))
+    
+    # Run inference
+    inference_results = run_inference(model, processor, inference_samples)
+    
+    # Display results
+    print("\nInference Results:")
+    correct_count = 0
+    for i, result in enumerate(inference_results):
+        print(f"Sample {i+1}:")
+        print(f"  Target:     {result['target']}")
+        print(f"  Prediction: {result['prediction']}")
+        print(f"  Correct:    {result['correct']}")
+        print("")
+        if result['correct']:
+            correct_count += 1
+    
+    print(f"Accuracy on inference samples: {correct_count / len(inference_results) * 100:.2f}%")
+    
+    # -------------------------------------------------------
+    # Push the final model and processor to the Hugging Face Hub (commented out).
     # -------------------------------------------------------
     #model.push_to_hub(HUB_MODEL_ID, use_auth_token=True)
     #processor.push_to_hub(HUB_MODEL_ID, use_auth_token=True)
     #print(f"Model and processor pushed to: https://huggingface.co/{HUB_MODEL_ID}")
+    
+    print("Script completed successfully.")
 
 if __name__ == "__main__":
     main()
