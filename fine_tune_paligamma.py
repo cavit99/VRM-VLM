@@ -49,8 +49,27 @@ class CollateWrapper:
         return collate_fn(examples, self.processor, self.device, self.dtype)
 
 def main():
+    # Add detection of world size (number of GPUs)
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    
+    # Initialize distributed training
+    if local_rank != -1:
+        torch.distributed.init_process_group(backend="nccl")
+        torch.cuda.set_device(local_rank)
+    
+    # Adjust device assignment
+    device = torch.device("cuda", local_rank) if torch.cuda.is_available() else "cpu"
+    
+    # Scale batch size by world size
+    global_batch_size = BATCH_SIZE * world_size
+    
+    # Only print on main process
+    if local_rank <= 0:
+        print(f"Running with {world_size} GPUs")
+        print(f"Global batch size: {global_batch_size}")
+    
     # Memory and CUDA optimizations
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     if device == "cuda":
         torch.backends.cudnn.benchmark = True
         torch.cuda.empty_cache()
