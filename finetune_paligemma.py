@@ -135,9 +135,18 @@ def main():
     lora_config = LoraConfig(
         r=8,
         target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-        task_type="CAUSAL_LM"
+        task_type="CAUSAL_LM",
+        lora_alpha=16,
+        lora_dropout=0.05,
+        bias="none",
     )
+    
+    # Print model parameters before LoRA to verify what's trainable initially
+    original_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Model trainable parameters before LoRA: {original_trainable}")
+    
     model = get_peft_model(model, lora_config)
+    print(f"PEFT model created with config: {lora_config}")
     
     # -------------------------------------------------------
     # Freeze the vision encoder layers to reduce the number of trainable parameters.
@@ -188,6 +197,26 @@ def main():
     # -------------------------------------------------------
     # Initialize the Trainer.
     # -------------------------------------------------------
+    
+    # Before training, check that we have trainable parameters
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Model has {trainable_params} trainable parameters")
+    
+    # If trainable_params is 0, explicitly mark LoRA parameters as trainable
+    if trainable_params == 0:
+        print("No trainable parameters found, forcing LoRA parameters to be trainable")
+        for name, param in model.named_parameters():
+            if 'lora' in name:
+                param.requires_grad = True
+        
+        # Check again
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"After fixing: Model has {trainable_params} trainable parameters")
+    
+    # Only proceed with training if we have trainable parameters
+    if trainable_params == 0:
+        raise ValueError("No trainable parameters found. Cannot train the model.")
+    
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -222,20 +251,6 @@ def main():
     #model.push_to_hub(HUB_MODEL_ID, use_auth_token=True)
     #processor.push_to_hub(HUB_MODEL_ID, use_auth_token=True)
     #print(f"Model and processor pushed to: https://huggingface.co/{HUB_MODEL_ID}")
-
-    # After applying LoRA, check that we have trainable parameters
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model has {trainable_params} trainable parameters")
-    
-    # If trainable_params is 0, explicitly mark LoRA parameters as trainable
-    if trainable_params == 0:
-        for name, param in model.named_parameters():
-            if 'lora' in name:
-                param.requires_grad = True
-        
-        # Check again
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"After fixing: Model has {trainable_params} trainable parameters")
 
 if __name__ == "__main__":
     main()
