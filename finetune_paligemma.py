@@ -122,8 +122,8 @@ def main():
         quantization_config=bnb_config,
         torch_dtype=torch.bfloat16,
         attn_implementation="eager",
-        use_cache=False
     )
+    model.config.use_cache = False
     
     # -------------------------------------------------------
     # Set up LoRA for efficient fine-tuning.
