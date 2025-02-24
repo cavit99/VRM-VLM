@@ -12,7 +12,8 @@ from transformers import (
     PaliGemmaProcessor,
     PaliGemmaForConditionalGeneration,
     TrainingArguments,
-    Trainer
+    Trainer,
+    BitsAndBytesConfig
 )
 
 logger = logging.getLogger(__name__)
@@ -102,13 +103,15 @@ def main():
     CONFIG = {
         "model_id": "google/paligemma2-3b-pt-448",
         "batch_size": 2,
-        "num_epochs": 1, #test
-        "gradient_accumulation_steps": 2,
+        "num_epochs": 1,  # for testing
+        "gradient_accumulation_steps": 16,
         "learning_rate": 1e-5,
         "lora_rank": 8,
         "lora_dropout": 0.1,
         "output_dir": "Paligemma2-3B-448-UK-Car-VRN",
-        "repo_name": "UK-Car-Plate-OCR-PaLiGemma"
+        "repo_name": "UK-Car-Plate-OCR-PaLiGemma",
+        "use_4bit": True,         # Enable 4-bit quantization with bitsandbytes
+        "bnb_quant_type": "nf4",    # Optional quantization type (default "nf4")
     }
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -117,18 +120,43 @@ def main():
     ds = load_dataset("spawn99/UK-Car-Plate-VRN-Dataset", split="train")
     train_ds, val_ds, test_ds = prepare_datasets(ds)
     
-    # Initialize model and processor
+    # Initialize processor
     processor = PaliGemmaProcessor.from_pretrained(CONFIG["model_id"])
-
-    model = PaliGemmaForConditionalGeneration.from_pretrained(
-        CONFIG["model_id"], 
-        device_map="auto", 
-        attn_implementation="eager"
-    )
     
-    logger.info(f"Model layer type: {type(model.model.layers[0])}")  # Should output <class '...GemmaDecoderLayer'>
+    # Load model with optional bitsandbytes 4-bit quantization
+    if CONFIG.get("use_4bit", False):
+        # Setup BitsAndBytes configuration for 4-bit quantization
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type=CONFIG.get("bnb_quant_type", "nf4"),
+            bnb_4bit_compute_type=torch.bfloat16,
+        )
+        model = PaliGemmaForConditionalGeneration.from_pretrained(
+            CONFIG["model_id"],
+            device_map="auto",
+            attn_implementation="eager",
+            quantization_config=bnb_config,
+            torch_dtype=torch.bfloat16,
+        )
+    else:
+        model = PaliGemmaForConditionalGeneration.from_pretrained(
+            CONFIG["model_id"],
+            device_map="auto",
+            attn_implementation="eager"
+        )
+    
+    logger.info(f"Model layer type pre freeze: {type(model.model.layers[0])}")  # Should output <class '...GemmaDecoderLayer'>
 
-    # Setup LoRA
+    for param in model.vision_tower.parameters():
+        param.requires_grad = False
+
+    for param in model.multi_modal_projector.parameters():
+        param.requires_grad = False
+
+    # Log model layer type (for debugging)
+    logger.info(f"Model layer type: {type(model.model.layers[0])}")
+    
+    # Setup LoRA configuration and wrap the model (works with both 4-bit and full precision)
     lora_config = LoraConfig(
         r=CONFIG["lora_rank"],
         target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
