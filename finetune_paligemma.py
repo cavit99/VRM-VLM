@@ -176,7 +176,8 @@ def main():
         remove_unused_columns=False,
         bf16=True,
         label_names=["labels"],
-        use_cache=False
+        dataloader_pin_memory=False,
+        dataloader_num_workers=2
     )
     
     # -------------------------------------------------------
@@ -189,6 +190,7 @@ def main():
         eval_dataset=valid_ds,
         data_collator=collate_fn,
         compute_metrics=compute_metrics,
+        use_cache=False
     )
     
     # -------------------------------------------------------
