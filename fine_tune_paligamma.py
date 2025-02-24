@@ -25,10 +25,6 @@ def main():
     num_epochs = 20
     gradient_accumulation_steps = 1
 
-    # Add memory management configuration
-    torch.cuda.set_per_process_memory_fraction(0.95)  # Leave some GPU memory free
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
-
     # 1. Load the dataset from the Hub.
     # The dataset was previously created with create_dataset.py.
     # It has 7500 rows with augmented images in the columns:
@@ -155,7 +151,6 @@ def main():
     print(f"Warmup steps: {warmup_steps}")
     print(f"Decay steps: {decay_steps}")
     print(f"Stable steps: {stable_steps}")
-
     # Generate a short UUID (first 8 characters)
     run_id = str(uuid.uuid4())[:8]
 
@@ -176,7 +171,7 @@ def main():
         label_smoothing_factor=0.1,    
         bf16=True,
         report_to=["wandb"],
-        run_name=f"paligemma-vrn-finetune-{run_id}",
+        run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
         eval_steps=500,
         dataloader_pin_memory=False,
