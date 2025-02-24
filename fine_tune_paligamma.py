@@ -157,13 +157,13 @@ def main():
     num_training_steps = (len(train_ds) // (BATCH_SIZE * gradient_accumulation_steps)) * num_epochs
     warmup_steps = num_training_steps // 15
 
-    # Calculate steps for 10 evenly spaced saves
-    save_steps = (num_training_steps // 10) * 10  # Round to nearest 10
-    eval_steps = (save_steps // 3) * 3  # Ensure divisible by 3 for even spacing
-    logger.info(f"Total training steps: {num_training_steps}")
-    logger.info(f"Saving every {save_steps} steps (10 saves total)")
-    logger.info(f"Evaluating every {eval_steps} steps (6 evals between saves)")
+    # Calculate steps for evenly spaced saves and evaluations
+    save_steps = num_training_steps // 10  # 10 saves total
+    eval_steps = save_steps  # Evaluate at the same frequency as saving
     
+    logger.info(f"Total training steps: {num_training_steps}")
+    logger.info(f"Saving and evaluating every {save_steps} steps")
+
     training_args = TrainingArguments(
         num_train_epochs=num_epochs,
         remove_unused_columns=False,
