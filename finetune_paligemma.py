@@ -123,7 +123,6 @@ def main():
         torch_dtype=torch.bfloat16,
         attn_implementation="eager",
     )
-    model.config.use_cache = False
     
     # -------------------------------------------------------
     # Set up LoRA for efficient fine-tuning.
