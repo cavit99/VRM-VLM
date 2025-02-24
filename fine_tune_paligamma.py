@@ -16,6 +16,7 @@ from transformers import (
 from PIL import Image
 import uuid
 import datetime
+from torch.distributed.elastic.multiprocessing.errors import record
 
 # Set a global verbosity level (INFO, DEBUG, etc.)
 logging.set_verbosity_info()
@@ -51,6 +52,7 @@ class CollateWrapper:
     def __call__(self, examples):
         return collate_fn(examples, self.processor, self.device, self.dtype)
 
+@record
 def main():
     # Initialize process group with better error handling
     local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -107,14 +109,22 @@ def main():
 
     # 3. Convert each row into two examples (one per augmented image).
     def split_augmented(example):
-        return [
-            {"image": img, "label": example["vrn"]}
-            for img in (
-                example.get("augmented_front_plate"),
-                example.get("augmented_rear_plate")
-            )
-            if img is not None
-        ]
+        results = []
+        for img in (
+            example.get("augmented_front_plate"),
+            example.get("augmented_rear_plate")
+        ):
+            if img is not None:
+                try:
+                    # Attempt to open and verify the image
+                    img.verify()  # Basic check
+                    img.load()    # Force loading pixel data
+                    results.append({"image": img, "label": example["vrn"]})
+                except (IOError, OSError) as e:
+                    logger.error(f"Error processing image: {e}")
+                    #  Optionally:  raise  #  Re-raise to halt execution
+                    #  Or, skip the bad image: continue
+        return results
 
     # Create flattened dataset directly
     flattened_data = []
@@ -238,8 +248,6 @@ def main():
         ddp_find_unused_parameters=False,
         dataloader_drop_last=True,
         gradient_checkpointing=True,
-        # Multi-GPU specific arguments:
-        local_rank=-1,
     )
 
     # 7. Initialize the Trainer with training and evaluation datasets.
