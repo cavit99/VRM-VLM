@@ -53,12 +53,33 @@ def main():
         "label": [x["label"] for x in flattened_data]
     })
 
-    # After flattening, we have approximately 15,000 examples.
-    # For perfect divisibility by BATCH_SIZE, we adjust the splits as follows:
-    train_count = 312 * BATCH_SIZE   # 312 batches = 9,984 examples for training
-    val_count = 62 * BATCH_SIZE      # 62 batches = 1,984 examples for validation
-    test_count = 62 * BATCH_SIZE     # 62 batches = 1,984 examples for testing
-    total_examples = train_count + val_count + test_count  # = 13,952 examples
+    # After flattening, we have approximately 15,000 examples
+    total_available = len(ds_aug)
+    print(f"Total available examples: {total_available}")
+    
+    # Calculate the largest number divisible by both BATCH_SIZE and our split ratio (70/15/15)
+    batches_per_epoch = (total_available // BATCH_SIZE // 20) * 20  # Round down to nearest multiple of 20
+    total_examples = batches_per_epoch * BATCH_SIZE
+    
+    # Calculate split sizes (70% train, 15% val, 15% test)
+    train_count = (batches_per_epoch * 14 // 20) * BATCH_SIZE  # 70%
+    val_count = (batches_per_epoch * 3 // 20) * BATCH_SIZE    # 15%
+    test_count = (batches_per_epoch * 3 // 20) * BATCH_SIZE   # 15%
+    
+    # Training steps calculation
+    gradient_accumulation_steps = 2
+    effective_batch_size = BATCH_SIZE * gradient_accumulation_steps
+    steps_per_epoch = train_count // effective_batch_size
+    total_training_steps = steps_per_epoch * 20  # 20 epochs
+    
+    # Log all calculations for verification
+    print("\nTraining Configuration:")
+    print(f"Total batches per epoch: {batches_per_epoch}")
+    print(f"Batch size: {BATCH_SIZE}")
+    print(f"Gradient accumulation steps: {gradient_accumulation_steps}")
+    print(f"Effective batch size: {effective_batch_size}")
+    print(f"Steps per epoch: {steps_per_epoch}")
+    print(f"Total training steps: {total_training_steps}")
 
     ds_aug = ds_aug.shuffle(seed=42)
     ds_aug = ds_aug.select(range(total_examples))
@@ -115,16 +136,30 @@ def main():
 
     # 6. Setup the training arguments.
 
-    # Compute total training steps.
-    # Since there are 312 batches per epoch and we're training for 20 epochs:
-    num_train_steps = 312 * 20  # = 6240 steps
+    # Compute steps based on dataset size, batch size, and gradient accumulation
+    effective_batch_size = BATCH_SIZE * 2  # account for gradient_accumulation_steps=2
+    steps_per_epoch = len(train_ds) // effective_batch_size
+    total_training_steps = steps_per_epoch * 20  # 20 epochs
+    
+    # Calculate scheduler steps
+    warmup_steps = total_training_steps // 20  # 5% of total steps for warmup
+    decay_steps = total_training_steps // 10   # 10% of total steps for decay
+    stable_steps = total_training_steps - warmup_steps - decay_steps  # Remaining steps
+    
+    print(f"Training steps calculation:")
+    print(f"Effective batch size: {effective_batch_size}")
+    print(f"Steps per epoch: {steps_per_epoch}")
+    print(f"Total training steps: {total_training_steps}")
+    print(f"Warmup steps: {warmup_steps}")
+    print(f"Decay steps: {decay_steps}")
+    print(f"Stable steps: {stable_steps}")
 
     training_args = TrainingArguments(
         num_train_epochs=20,
         remove_unused_columns=False,
         per_device_train_batch_size=BATCH_SIZE,
-        gradient_accumulation_steps=2,  # Added to maintain effective batch size
-        warmup_steps=300,
+        gradient_accumulation_steps=1,  
+        warmup_steps=warmup_steps,  
         weight_decay=1e-6,
         adam_beta2=0.999,
         logging_steps=100,
@@ -137,16 +172,15 @@ def main():
         bf16=True,
         report_to=["wandb"],
         run_name="paligemma-vrn-finetune",
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         eval_steps=500,
         dataloader_pin_memory=False,
         lr_scheduler_type="warmup_stable_decay",
-        # Pass additional scheduler arguments so that the scheduler has all required inputs.
         lr_scheduler_kwargs={
-            "num_decay_steps": 624,
-            "num_stable_steps": 5316,
+            "num_decay_steps": decay_steps,
+            "num_stable_steps": stable_steps,
             "min_lr_ratio": 0.1
-       }
+        }
     )
 
     # 7. Initialize the custom Trainer with training and evaluation datasets.
