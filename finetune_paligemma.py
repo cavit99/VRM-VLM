@@ -113,6 +113,10 @@ def main():
         "use_4bit": True,         # Enable 4-bit quantization with bitsandbytes
         "bnb_quant_type": "nf4",    # Optional quantization type (default "nf4")
     }
+
+    import os  # Added import if not already present
+    # Use LOCAL_RANK from the environment to set the correct GPU for each process.
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -136,7 +140,8 @@ def main():
             attn_implementation="eager",
             quantization_config=bnb_config,
             torch_dtype=torch.bfloat16,
-            device_map={"": f"cuda:{torch.cuda.current_device()}"}
+            # Ensure the model is loaded onto the correct GPU by using LOCAL_RANK.
+            device_map={"": f"cuda:{local_rank}"}
         )
     else:
         model = PaliGemmaForConditionalGeneration.from_pretrained(
