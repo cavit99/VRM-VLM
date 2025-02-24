@@ -43,7 +43,7 @@ def main():
     
     # Adjusted configurations for better GPU utilization
     BATCH_SIZE = 6  # Increased from 4 to utilize more GPU memory
-    num_epochs = 20
+    num_epochs = 10
     gradient_accumulation_steps = 1  # Reduced since we increased batch size
 
     # 1. Load the dataset from the Hub.
@@ -119,6 +119,9 @@ def main():
     val_size = int(0.15 * total_examples)
     test_size = total_examples - train_size - val_size
 
+    # Split the dataset with shuffling
+    ds_aug = ds_aug.shuffle(seed=42)  # Add random shuffling with a fixed seed
+    
     # Split the dataset directly
     train_ds = ds_aug.select(range(0, train_size))
     val_ds = ds_aug.select(range(train_size, train_size + val_size))
@@ -150,10 +153,27 @@ def main():
     # 6. Setup the training arguments using a cosine scheduler.
     run_id = str(uuid.uuid4())[:8]
     
-    # Calculate warmup steps (typically 10% of total steps)
+    # Calculate total training steps (using floor division)
     num_training_steps = (len(train_ds) // (BATCH_SIZE * gradient_accumulation_steps)) * num_epochs
-    warmup_steps = num_training_steps // 10
+    warmup_steps = num_training_steps // 15
 
+    # Choose a logging/eval frequency near 500 that perfectly divides the total training steps.
+    def get_divisor(total, target):
+        if total % target == 0:
+            return target
+        offset = 0
+        while True:
+            lower = target - offset
+            if lower > 0 and total % lower == 0:
+                return lower
+            upper = target + offset
+            if total % upper == 0:
+                return upper
+            offset += 1
+
+    log_eval_steps = get_divisor(num_training_steps, 500)
+    logger.info(f"Using {log_eval_steps} steps for logging and evaluation (Total training steps: {num_training_steps}).")
+    
     training_args = TrainingArguments(
         num_train_epochs=num_epochs,
         remove_unused_columns=False,
@@ -161,18 +181,18 @@ def main():
         per_device_eval_batch_size=BATCH_SIZE * 2,
         gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,
-        learning_rate=2.5e-5,
+        learning_rate=2e-5,
         weight_decay=0.01,
-        logging_steps=200,    
+        logging_steps=log_eval_steps,   
         save_strategy="epoch",
-        save_total_limit=3,
+        save_total_limit=10,
         output_dir="Paligemma2-3B-448-UK-Car-VRN",
         max_grad_norm=1.0,
         bf16=True,
         report_to=["wandb"],
         run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
-        eval_steps=200,
+        eval_steps=log_eval_steps,      
         dataloader_pin_memory=True,
         lr_scheduler_type="cosine",
         gradient_checkpointing=True,
@@ -180,7 +200,18 @@ def main():
         fp16_full_eval=True,
         dataloader_num_workers=4,
         torch_compile=True,
+        load_best_model_at_end=True,
+        metric_for_best_model="accuracy",
+        greater_is_better=True,
     )
+
+    # Define a custom compute_metrics function to track evaluation metrics
+    def compute_metrics(eval_pred):
+        predictions = eval_pred.predictions
+        labels = eval_pred.label_ids
+        return {
+            "accuracy": (predictions == labels).mean()
+        }
 
     trainer = Trainer(
         model=model,
@@ -188,6 +219,7 @@ def main():
         eval_dataset=val_ds,
         data_collator=partial(collate_fn, processor=processor, dtype=DTYPE),
         args=training_args,
+        compute_metrics=compute_metrics,
     )
 
     # 8. Launch training.
@@ -197,9 +229,18 @@ def main():
     results = trainer.predict(test_ds)
     logger.info(f"Test results: {results.metrics}")
 
-    # 10. Optionally, push your model to the Hugging Face Hub.
-    trainer.push_to_hub()
+    # 10. Get the best checkpoint path and push to Hub
+    best_ckpt_path = trainer.state.best_model_checkpoint
+    logger.info(f"Best checkpoint path: {best_ckpt_path}")
+    
+    # Push the best model to the Hub
+    trainer.push_to_hub(
+        repo_name="UK-Car-Plate-OCR-PaLiGemma",  # Choose your desired repository name
+        commit_message=f"Best model checkpoint - Accuracy: {results.metrics['accuracy']:.4f}",
+        blocking=True  # Wait until the upload is complete
+    )
 
+    logger.info("Model successfully pushed to Hub!")
 
 if __name__ == '__main__':
     main() 
