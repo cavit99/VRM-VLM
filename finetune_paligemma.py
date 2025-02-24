@@ -3,6 +3,7 @@ import uuid
 from functools import partial
 from typing import List, Dict, Any
 
+import numpy as np
 import torch
 from datasets import load_dataset, Dataset
 from peft import get_peft_model, LoraConfig
@@ -11,8 +12,7 @@ from transformers import (
     PaliGemmaProcessor,
     PaliGemmaForConditionalGeneration,
     TrainingArguments,
-    Trainer,
-    BitsAndBytesConfig
+    Trainer
 )
 
 logger = logging.getLogger(__name__)
@@ -101,8 +101,9 @@ def main():
     # Configuration
     CONFIG = {
         "model_id": "google/paligemma2-3b-pt-448",
-        "batch_size": 4,
+        "batch_size": 2,
         "num_epochs": 5,
+        "gradient_accumulation_steps": 2,
         "learning_rate": 1e-5,
         "lora_rank": 8,
         "lora_dropout": 0.1,
@@ -119,12 +120,9 @@ def main():
     # Initialize model and processor
     processor = PaliGemmaProcessor.from_pretrained(CONFIG["model_id"])
 
-    bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16)
-
     model = PaliGemmaForConditionalGeneration.from_pretrained(
         CONFIG["model_id"], 
         device_map="auto", 
-        quantization_config=bnb_config,
         attn_implementation="eager"
     )
     
@@ -183,18 +181,19 @@ def main():
         eval_steps=eval_steps,
         dataloader_pin_memory=False,
         lr_scheduler_type="cosine",
-        optim="paged_adamw_8bit", 
+        optim="adamw_torch",
         dataloader_num_workers=4,
         load_best_model_at_end=True,
         metric_for_best_model="accuracy",
         greater_is_better=True,
         per_device_train_batch_size=CONFIG["batch_size"],  
         per_device_eval_batch_size=CONFIG["batch_size"],   
+        gradient_accumulation_steps=CONFIG["gradient_accumulation_steps"],
         eval_accumulation_steps=4
     )
 
      # Define a custom compute_metrics function to track evaluation metrics
-    import numpy as np
+    
     def compute_metrics(eval_pred):
         logits, labels = eval_pred
         # Compute predictions using argmax over the logits
@@ -220,7 +219,10 @@ def main():
     )
 
     # 8. Launch training.
+    torch.cuda.empty_cache()
+    print(f"VRAM before training: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
     trainer.train()
+    print(f"Max VRAM during training: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
 
     # 9. Evaluate on the test dataset.
     results = trainer.predict(test_ds)
@@ -231,11 +233,11 @@ def main():
     logger.info(f"Best checkpoint path: {best_ckpt_path}")
     
     # Push the best model to the Hub
-    trainer.push_to_hub(
-        repo_name=CONFIG["repo_name"],  # Choose your desired repository name
-        commit_message=f"Best model checkpoint - Accuracy: {results.metrics['accuracy']:.4f}",
-        blocking=True  # Wait until the upload is complete
-    )
+    #trainer.push_to_hub(
+    #    repo_name=CONFIG["repo_name"],  
+    #    commit_message=f"Best model checkpoint - Accuracy: {results.metrics['accuracy']:.4f}",
+    #    blocking=True  
+    #)
 
     logger.info("Model successfully pushed to Hub!")
 
