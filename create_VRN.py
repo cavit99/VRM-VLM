@@ -2,14 +2,14 @@
 """
 VRN Generator
 
-Generates UK vehicle registration numbers (plates) according to the following rules:
+Creates UK vehicle registration numbers (plates) according to the following rules:
   • Format: 2 letters (memory tag) + 2 numbers (age identifier) + space + 3 random letters.
   • Memory tag (first two letters) is chosen from groups as follows:
       – 25% chance from those starting with L (London: LA–LY)
       – 25% chance from those starting with B (Birmingham: BA–BY)
       – 25% chance from those starting with M (Manchester/Merseyside: MA–MY)
       – 25% chance from all the remaining allowed pairs.
-    The allowed memory tag pairs are generated from a fixed set of allowed characters.
+    The allowed memory tag pairs are created from a fixed set of allowed characters.
    (Note some groups—for V we only allow "VA" and "VY".)
   • Age identifier (two digits) is chosen from all allowed values:
       Allowed values: 02–14, 15–25, 52–64, 65–75.
@@ -40,7 +40,7 @@ import random
 import string
 import sys
 
-# COUNT determines how many VRNs to generate; you may override this
+# COUNT determines how many VRNs to create; you may override this
 COUNT = 50
 
 # Allowed memory tag list exactly as in the snippet.
@@ -185,9 +185,9 @@ def choose_flash_data():
                 flag = "SCO" if random.random() < 0.9 else "NONE"
     return flash, flag, country
 
-def generate_plate_record():
+def create_plate_record():
     """
-    Generate one complete plate record.
+    Create one complete plate record.
     Returns a dict with keys: VRN, flash, flag, country
     """
     vrn = choose_vrn()
@@ -199,19 +199,19 @@ def generate_plate_record():
         'country': country
     }
 
-def generate_plates(count=COUNT):
+def create_plates(count=COUNT):
     """
-    Generate multiple plate records ensuring no duplicate VRNs.
+    Create multiple plate records ensuring no duplicate VRNs.
 
     Args:
-        count (int): Number of plates to generate
+        count (int): Number of plates to create
     Returns:
         list: List of dicts, each containing a unique plate record data.
     """
     records = []
     seen_vrns = set()
     while len(records) < count:
-        record = generate_plate_record()
+        record = create_plate_record()
         if record['VRN'] not in seen_vrns:
             records.append(record)
             seen_vrns.add(record['VRN'])
@@ -225,8 +225,8 @@ def main():
         except ValueError:
             pass
 
-    # Generate records
-    records = generate_plates(count)
+    # Create records
+    records = create_plates(count)
     
     # Write CSV to stdout
     writer = csv.DictWriter(sys.stdout, fieldnames=['VRN', 'flash', 'flag', 'country'])

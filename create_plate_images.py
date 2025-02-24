@@ -19,7 +19,7 @@ each plate as two JPEG images (front and rear) according to the following rules:
 Usage:
     - Import and call generate_plates from the VRN module as:
           from generate_VRN import generate_plates
-    - Run this script (by default 5 plates are generated; the number can be provided as an argument).
+    - Run this script (by default 1 plates are created; the number can be provided as an argument).
 
 Make sure you have Pillow installed:
     pip install Pillow
@@ -32,7 +32,7 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 # Import the VRN generator (change the module name/path as needed)
-from generate_VRN import generate_plates  # our module that returns the plate data dictionaries
+from create_VRN import generate_plates  # our module that returns the plate data dictionaries
 
 # ---------------------------
 # Define conversion and layout constants
@@ -288,13 +288,13 @@ def main():
         try:
             num_plates = int(sys.argv[1])
         except ValueError:
-            print("Invalid number provided, using default (5).")
+            print("Invalid number provided, using default (1).")
     
     # Generate VRN dictionaries using our VRN generator module.
     plates = generate_plates(num_plates)
     
     # Create and/or ensure output directory exists.
-    output_dir = "generated"
+    output_dir = "created"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
@@ -337,7 +337,7 @@ def main():
         rear_filename = os.path.join(output_dir, f"{vrn_clean}_r.jpg")
         rear_plate_img.save(rear_filename, "JPEG")
         
-        print(f"Generated plate {plate['VRN']}: {front_filename} and {rear_filename}")
+        print(f"Created plate {plate['VRN']}: {front_filename} and {rear_filename}")
     
 
 if __name__ == '__main__':

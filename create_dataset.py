@@ -1,93 +1,107 @@
 import os
 from datasets import Dataset, Features, Value, Image
-# The datasets library automatically handles image conversion using PIL under the hood
 import datetime
 
-# Folder where your images are located
-GENERATED_FOLDER = 'generated'
+# Folders with images
+FOLDERS = ['generated', 'augmented']
 
-# Replace 'your_username/uk_plate_dataset' with your actual repository name.
+# Replace with your actual repository name.
 repo_name = "spawn99/UK-Car-Plate-VRN-Dataset"
 
-# List to store our dataset rows
-rows = []
+# Create a dictionary to accumulate records keyed by VRN.
+data = {}
 
-# Iterate over all files in the 'generated' folder
-for filename in os.listdir(GENERATED_FOLDER):
-    if filename.endswith('.jpg'):
-        # Expected filename format: "VRN_side.jpg" (e.g. "LA19VPZ_f.jpg")
-        base, _ = os.path.splitext(filename)  # e.g., "LA19VPZ_f"
-        parts = base.split('_')
-        if len(parts) < 2:
-            # Skip any file that does not match the expected format
-            continue
+# Process images from both "generated" and "augmented" folders.
+for folder in FOLDERS:
+    if not os.path.exists(folder):
+        continue
+    for filename in os.listdir(folder):
+        if filename.endswith('.jpg'):
+            # Expected filename formats:
+            #   - Original: "VRN_side.jpg" (e.g. "LA19VPZ_f.jpg")
+            #   - Augmented: "VRN_side_aug0.jpg" (or similar)
+            base, _ = os.path.splitext(filename)
+            parts = base.split('_')
+            if len(parts) < 2:
+                continue
 
-        vrn = parts[0]
-        plate_side_code = parts[1].lower()
+            vrn = parts[0]
+            plate_side_code = parts[1].lower()  # expecting 'f' or 'r'
+            image_path = os.path.join(folder, filename)
+            
+            if vrn not in data:
+                data[vrn] = {
+                    "vrn": vrn,
+                    "front_plate": None,
+                    "rear_plate": None,
+                    "augmented_front_plate": None,  # single augmented front image
+                    "augmented_rear_plate": None    # single augmented rear image
+                }
+            
+            # Handle generated images
+            if folder == "generated":
+                if plate_side_code == 'f':
+                    data[vrn]["front_plate"] = image_path
+                elif plate_side_code == 'r':
+                    data[vrn]["rear_plate"] = image_path
+            # Handle augmented images
+            elif folder == "augmented":
+                # Only set if not already set, as we intend to have just 1 augmentation per image.
+                if plate_side_code == 'f' and data[vrn]["augmented_front_plate"] is None:
+                    data[vrn]["augmented_front_plate"] = image_path
+                elif plate_side_code == 'r' and data[vrn]["augmented_rear_plate"] is None:
+                    data[vrn]["augmented_rear_plate"] = image_path
 
-        # Determine plate type based on the filename suffix
-        if plate_side_code == 'f':
-            plate_type = "front"
-        elif plate_side_code == 'r':
-            plate_type = "rear"
-        else:
-            # If there is an unexpected code, mark as unknown
-            plate_type = "unknown"
+# Convert the data dictionary to a list of rows.
+rows = list(data.values())
 
-        # Full path to the image file
-        image_path = os.path.join(GENERATED_FOLDER, filename)
-
-        # Append example dictionary
-        rows.append({
-            "file_name": filename,
-            "vrn": vrn,
-            "plate_type": plate_type,
-            "image": image_path  # the Image() feature will read this file
-        })
-
-# Define the features (schema) for the dataset
+# Define the features (dataset schema) using the flat structure.
 features = Features({
-    "file_name": Value("string"),
     "vrn": Value("string"),
-    "plate_type": Value("string"),
-    "image": Image()
+    "front_plate": Image(),  # single front plate image
+    "rear_plate": Image(),   # single rear plate image
+    "augmented_front_plate": Image(),  # single augmented front image
+    "augmented_rear_plate": Image()      # single augmented rear image
 })
 
-# Create a dictionary with lists for each column from the rows
-data_dict = {key: [row[key] for row in rows] for key in rows[0]}
+# Create the Hugging Face dataset. This converts each record field into a list.
+ds = Dataset.from_dict({k: [row[k] for row in rows] for k in rows[0]}, features=features)
 
-# Create the Hugging Face dataset
-ds = Dataset.from_dict(data_dict, features=features)
+# Compute dataset statistics by counting the available images.
+front_count = sum(1 for row in rows if row["front_plate"] is not None)
+rear_count = sum(1 for row in rows if row["rear_plate"] is not None)
+aug_front_count = sum(1 for row in rows if row["augmented_front_plate"] is not None)
+aug_rear_count = sum(1 for row in rows if row["augmented_rear_plate"] is not None)
 
-# Before pushing to hub, let's create a README.md file
+# Create a README.md file with improved clarity using the updated structure.
 readme_content = """# UK Car Plate VRN Dataset
 
 ## Dataset Description
-This dataset contains images of UK car license plates (Vehicle Registration Numbers - VRNs) with their corresponding plate types (front/rear).
+This dataset contains VRNs along with their respective UK car plate images. Each VRN record provides:
+- **front_plate:** Synthetically created front license plate image.
+- **rear_plate:** Synthetically created rear license plate image.
+- **augmented_front_plate:** The augmented front license plate image.
+- **augmented_rear_plate:** The augmented rear license plate image.
 
 ### Dataset Creation Date
 {}
 
+### Dataset Creation Method
+See GitHub repository for details: [https://github.com/cavit99/VRM-VLM](https://github.com/cavit99/VRM-VLM)
+
 ### Dataset Structure
-- **file_name**: Name of the image file
-- **vrn**: Vehicle Registration Number
-- **plate_type**: Position of the plate (front/rear)
-- **image**: Image file in jpg format
-
-### File Naming Convention
-Files are named using the format: `VRN_side.jpg`
-where:
-- VRN: The vehicle registration number
-- side: 'f' for front plate, 'r' for rear plate
-
-### Data Collection Method
-Images are collected from the 'generated' folder. Each image is processed to extract the VRN and plate type information from the filename.
-
-The code used to generate this synthetic dataset is available at: https://github.com/cavit99/VRM-VLM
+- **vrn:** Vehicle Registration Number.
+- **front_plate:** The front view of the license plate.
+- **rear_plate:** The rear view of the license plate.
+- **augmented_front_plate:** An augmented front plate image.
+- **augmented_rear_plate:** An augmented rear plate image.
 
 ### Dataset Statistics
-{} total images
-
+- **Total distinct VRNs:** {}
+- **Created Front Plates:** {}
+- **Created Rear Plates:** {}
+- **Augmented Front Plates:** {}
+- **Augmented Rear Plates:** {}
 
 ### License
 MIT License
@@ -114,17 +128,22 @@ SOFTWARE.
 
 ### Contact
 Dataset created by: Cavit Erginsoy - 2025
-Repository: https://huggingface.co/datasets/{repo_name}
+Repository: https://huggingface.co/datasets/{}
 """.format(
     datetime.datetime.now().strftime("%Y-%m-%d"),
-    len(rows)
+    len(rows),
+    front_count,
+    rear_count,
+    aug_front_count,
+    aug_rear_count,
+    repo_name
 )
 
 # Write README.md
 with open("README.md", "w") as f:
     f.write(readme_content)
 
-# Push the dataset to the Hugging Face Hub:
+# Push the dataset to the Hugging Face Hub.
 ds.push_to_hub(repo_name, private=False)
 
 print(f"Dataset pushed to: https://huggingface.co/datasets/{repo_name}") 

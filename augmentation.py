@@ -216,13 +216,13 @@ class ImageAugmenter:
         print(f"Saved augmented image to {output_path}")
 
 def main():
-    input_folder = "generated"
+    input_folder = "created"
     output_folder = "augmented"
     num_augmentations = 1
     
     image_files = glob.glob(os.path.join(input_folder, "*.jpg"))
     if not image_files:
-        print("No images found in the 'generated' folder.")
+        print("No images found in the 'created' folder.")
         return
 
     augmenter = ImageAugmenter()
