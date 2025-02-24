@@ -105,7 +105,7 @@ def prepare_datasets(ds: Dataset) -> tuple[Dataset, Dataset, Dataset]:
     # Validate splits
     for name, dataset in [
         ("training", train_ds),
-        ("validation", val_ds),i
+        ("validation", val_ds),
         ("test", test_ds)
     ]:
         logger.info(f"{name.capitalize()} dataset size: {len(dataset)}")
