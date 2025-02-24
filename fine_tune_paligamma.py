@@ -1,5 +1,4 @@
 import torch
-import multiprocessing
 from datasets import load_dataset, Dataset
 from transformers import (
     PaliGemmaProcessor,
@@ -61,7 +60,8 @@ def main():
     BATCH_SIZE = 8 
     num_epochs = 20
     gradient_accumulation_steps = 1  
-    num_workers = 2  # Reduced number of workers
+    num_workers = min(4, os.cpu_count()//2)  # Example: 4 workers
+    torch.backends.cudnn.benchmark = True
 
     # 1. Load the dataset from the Hub.
     # The dataset was previously created with create_dataset.py.
@@ -165,12 +165,11 @@ def main():
 
     # Warmup pass to initialize CUDA
     print("Performing CUDA warmup pass...")
-    dummy_input = processor(
-        text=["<image>ocr\n"], 
-        images=[Image.new("RGB", (448,448))],
-        return_tensors="pt"
-    ).to(device)
-    model.generate(**dummy_input, max_new_tokens=20)
+    with torch.no_grad():
+        dummy_output = model.generate(**dummy_input, max_new_tokens=20)
+        torch.cuda.synchronize()  # Add explicit sync
+    del dummy_input, dummy_output
+    torch.cuda.empty_cache()
 
     model.train()  # Unfreeze entire model.
     DTYPE = model.dtype
@@ -243,7 +242,10 @@ def main():
             "num_stable_steps": stable_steps,
             "min_lr_ratio": 0.1
         },
-        dataloader_num_workers=num_workers,  # Reduced number of workers
+        dataloader_num_workers=num_workers,
+        ddp_find_unused_parameters=False,
+        dataloader_drop_last=True,
+        gradient_checkpointing=True 
     )
 
     # 7. Initialize the custom Trainer with training and evaluation datasets.
@@ -267,5 +269,5 @@ def main():
 
 
 if __name__ == '__main__':
-    multiprocessing.set_start_method('spawn', force=True)
+    torch.multiprocessing.set_sharing_strategy('file_system')
     main() 
