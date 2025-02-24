@@ -20,7 +20,7 @@ class CustomTrainer(Trainer):
 
 def main():
     # Reduce batch size to help with memory issues
-    BATCH_SIZE = 16  
+    BATCH_SIZE = 8  
     num_epochs = 20
     gradient_accumulation_steps = 1
 
