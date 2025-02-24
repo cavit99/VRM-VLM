@@ -157,22 +157,12 @@ def main():
     num_training_steps = (len(train_ds) // (BATCH_SIZE * gradient_accumulation_steps)) * num_epochs
     warmup_steps = num_training_steps // 15
 
-    # Choose a logging/eval frequency near 500 that perfectly divides the total training steps.
-    def get_divisor(total, target):
-        if total % target == 0:
-            return target
-        offset = 0
-        while True:
-            lower = target - offset
-            if lower > 0 and total % lower == 0:
-                return lower
-            upper = target + offset
-            if total % upper == 0:
-                return upper
-            offset += 1
-
-    log_eval_steps = get_divisor(num_training_steps, 500)
-    logger.info(f"Using {log_eval_steps} steps for logging and evaluation (Total training steps: {num_training_steps}).")
+    # Calculate steps for 10 evenly spaced saves
+    save_steps = (num_training_steps // 10) * 10  # Round to nearest 10
+    eval_steps = (save_steps // 3) * 3  # Ensure divisible by 3 for even spacing
+    logger.info(f"Total training steps: {num_training_steps}")
+    logger.info(f"Saving every {save_steps} steps (10 saves total)")
+    logger.info(f"Evaluating every {eval_steps} steps (6 evals between saves)")
     
     training_args = TrainingArguments(
         num_train_epochs=num_epochs,
@@ -183,8 +173,9 @@ def main():
         warmup_steps=warmup_steps,
         learning_rate=2e-5,
         weight_decay=0.01,
-        logging_steps=log_eval_steps,   
-        save_strategy="epoch",
+        logging_steps=eval_steps,     # More frequent logging
+        save_strategy="steps",
+        save_steps=save_steps,        # 10 saves total
         save_total_limit=10,
         output_dir="Paligemma2-3B-448-UK-Car-VRN",
         max_grad_norm=1.0,
@@ -192,7 +183,7 @@ def main():
         report_to=["wandb"],
         run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
-        eval_steps=log_eval_steps,      
+        eval_steps=eval_steps,        # More frequent evaluation
         dataloader_pin_memory=True,
         lr_scheduler_type="cosine",
         gradient_checkpointing=True,
