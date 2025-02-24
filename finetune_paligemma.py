@@ -102,7 +102,7 @@ def main():
     CONFIG = {
         "model_id": "google/paligemma2-3b-pt-448",
         "batch_size": 2,
-        "num_epochs": 5,
+        "num_epochs": 1, #test
         "gradient_accumulation_steps": 2,
         "learning_rate": 1e-5,
         "lora_rank": 8,
