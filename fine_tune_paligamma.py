@@ -175,9 +175,9 @@ def main():
         warmup_steps=warmup_steps,
         learning_rate=2e-5,
         weight_decay=0.01,
-        logging_steps=eval_steps,     # More frequent logging
+        logging_steps=eval_steps,
         save_strategy="steps",
-        save_steps=save_steps,        # 10 saves total
+        save_steps=save_steps,
         save_total_limit=10,
         output_dir="Paligemma2-3B-448-UK-Car-VRN",
         max_grad_norm=1.0,
@@ -185,12 +185,11 @@ def main():
         report_to=["wandb"],
         run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
-        eval_steps=eval_steps,        # More frequent evaluation
+        eval_steps=eval_steps,
         dataloader_pin_memory=True,
         lr_scheduler_type="cosine",
         gradient_checkpointing=True,
         optim="adamw_torch_fused",
-        fp16_full_eval=True,
         dataloader_num_workers=4,
         torch_compile=True,
         load_best_model_at_end=True,
