@@ -1,4 +1,5 @@
 import torch
+from functools import partial
 
 from datasets import load_dataset, Dataset
 
@@ -13,12 +14,10 @@ from PIL import Image
 import uuid
 
 
-# Set a global verbosity level (INFO, DEBUG, etc.)
 logging.set_verbosity_info()
 logger = logging.get_logger(__name__)
 
 
-# Move both collate functions outside of main() to make them pickleable
 def collate_fn(examples, processor, dtype):
     texts = ["<image>ocr\n" for _ in examples]
     labels = [example["label"] for example in examples]
@@ -38,14 +37,6 @@ def collate_fn(examples, processor, dtype):
     tokens = tokens.to(dtype)
     return tokens
 
-class CollateWrapper:
-    def __init__(self, processor, dtype):
-        self.processor = processor
-        self.dtype = dtype
-    
-    def __call__(self, examples):
-        return collate_fn(examples, self.processor, self.dtype)
-
 def main():
     # Simplified device setup for single GPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -54,12 +45,6 @@ def main():
     BATCH_SIZE = 2
     num_epochs = 20
     gradient_accumulation_steps = 1
-    num_workers = 4  
-
-    # Memory and CUDA optimizations
-    if device.type == "cuda":
-        torch.backends.cudnn.benchmark = True
-        torch.cuda.empty_cache()
 
     # 1. Load the dataset from the Hub.
     # The dataset was previously created with create_dataset.py.
@@ -157,23 +142,6 @@ def main():
         torch_dtype=torch.bfloat16
     ).to(device)
 
-    # Create dummy input for warmup pass
-    dummy_text = ["<image>ocr\n"]
-    dummy_image = Image.new('RGB', (448, 448))  # Create blank image of correct size
-    dummy_input = processor(
-        text=dummy_text,
-        images=[dummy_image],
-        return_tensors="pt",
-        padding="longest"
-    ).to(device)
-
-    # Warmup pass to initialize CUDA
-    logger.info("Performing CUDA warmup pass...")
-    with torch.no_grad():
-        dummy_output = model.generate(**dummy_input, max_new_tokens=20)
-        torch.cuda.synchronize()  # Add explicit sync
-    del dummy_input, dummy_output
-    torch.cuda.empty_cache()
 
     model.train()  # Unfreeze entire model.
     DTYPE = model.dtype
@@ -192,10 +160,10 @@ def main():
         per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,
-        learning_rate=1e-5,  # Increase from 5e-6 for faster learning
+        learning_rate=1e-5,  
         weight_decay=0.01,
-        logging_steps=200,    # Log more frequently
-        save_strategy="epoch",  # Simplified saving strategy
+        logging_steps=200,    
+        save_strategy="epoch",  
         save_total_limit=3,
         output_dir="Paligemma2-3B-448-UK-Car-VRN",
         max_grad_norm=1.0,
@@ -206,7 +174,6 @@ def main():
         eval_steps=200,      # More frequent evaluation
         dataloader_pin_memory=True,
         lr_scheduler_type="cosine",
-        dataloader_num_workers=num_workers,
         gradient_checkpointing=True,
         group_by_length=False,
     )
@@ -222,7 +189,7 @@ def main():
         model=model,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        data_collator=CollateWrapper(processor, DTYPE),
+        data_collator=partial(collate_fn, processor=processor, dtype=DTYPE),
         args=training_args,
     )
 
