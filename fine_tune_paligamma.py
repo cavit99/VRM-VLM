@@ -23,6 +23,9 @@ class CustomTrainer(Trainer):
         return optimizer
 
 def main():
+    # Define batch size parameter for easy adjustment.
+    BATCH_SIZE = 32
+
     # 1. Load the dataset from the Hub.
     # The dataset was previously created with create_dataset.py.
     # It has 7500 rows with augmented images in the columns:
@@ -40,20 +43,34 @@ def main():
             if img is not None
         ]
 
-    # Use map and flatten to create individual examples
+    # Use flat_map to create individual examples.
     ds_aug = ds.flat_map(split_augmented)
     # After flat_map, we have approximately 15,000 examples.
-    # For perfect divisibility by 32, we adjust the splits as follows:
-    train_count = 312 * 32   # 312 batches = 9,984 examples for training.
-    val_count   = 62 * 32    # 62 batches = 1,984 examples for validation.
-    test_count  = 62 * 32    # 62 batches = 1,984 examples for testing.
+    # For perfect divisibility by BATCH_SIZE, we adjust the splits as follows:
+    train_count = 312 * BATCH_SIZE   # 312 batches = 9,984 examples for training.
+    val_count   = 62 * BATCH_SIZE      # 62 batches = 1,984 examples for validation.
+    test_count  = 62 * BATCH_SIZE      # 62 batches = 1,984 examples for testing.
     total_examples = train_count + val_count + test_count  # = 13,952 examples
 
     ds_aug = ds_aug.shuffle(seed=42)
     ds_aug = ds_aug.select(range(total_examples))
+    
+    # Log the total number of examples selected.
+    print(f"Total examples selected: {total_examples}")
+
+    # Split the dataset.
     train_ds = ds_aug.select(range(0, train_count))
     val_ds = ds_aug.select(range(train_count, train_count + val_count))
     test_ds = ds_aug.select(range(train_count + val_count, total_examples))
+    
+    # Assertions and logging to verify dataset splits.
+    assert len(train_ds) == train_count, f"Expected {train_count} train examples, got {len(train_ds)}"
+    assert len(val_ds) == val_count, f"Expected {val_count} validation examples, got {len(val_ds)}"
+    assert len(test_ds) == test_count, f"Expected {test_count} test examples, got {len(test_ds)}"
+    
+    print(f"Train dataset size: {len(train_ds)}")
+    print(f"Validation dataset size: {len(val_ds)}")
+    print(f"Test dataset size: {len(test_ds)}")
     
     # 4. Load the model and processor
     model_id = "google/paligemma2-3b-pt-448"
@@ -92,7 +109,7 @@ def main():
     training_args = TrainingArguments(
         num_train_epochs=20,          
         remove_unused_columns=False,
-        per_device_train_batch_size=32, 
+        per_device_train_batch_size=BATCH_SIZE, 
         warmup_steps=300,
         weight_decay=1e-6,
         adam_beta2=0.999,
@@ -105,9 +122,9 @@ def main():
         label_smoothing_factor=0.1,    
         bf16=True,
         report_to=["wandb"],
-        run_name="paligemma-vrn-finetune",  # Add a descriptive run name
-        evaluation_strategy="steps",    # Add evaluation strategy
-        eval_steps=500,                # Add evaluation frequency
+        run_name="paligemma-vrn-finetune",  # Descriptive run name.
+        evaluation_strategy="steps",        # Evaluation strategy.
+        eval_steps=500,                     # Evaluation frequency.
         dataloader_pin_memory=False,
         lr_scheduler_type="warmup_stable_decay", 
     )
