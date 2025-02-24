@@ -62,13 +62,12 @@ def load_and_prepare_dataset(subset_ratio=1.0):
     return train_ds, valid_ds, test_ds
 
 def collate_fn(batch):
-    images, labels = zip(*batch)
+    # Batch contains dictionaries with "image", "prompt", and "target" keys
+    images = [item["image"] for item in batch]
+    prefixes = [f"<image>{item['prompt']}" for item in batch]  # Add the image token to the prompt
+    suffixes = [item["target"] for item in batch]  # Use the target as the suffix
 
-    # Extract prompts and annotations.
-    prefixes = ["<image>" + label["prefix"] for label in labels]
-    suffixes = [label["suffix"] for label in labels]
-
-    # Process the inputs using the processor.
+    # Process the inputs using the processor
     inputs = processor(
         text=prefixes,
         images=images,
