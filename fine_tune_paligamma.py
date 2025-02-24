@@ -37,7 +37,7 @@ def collate_fn(examples, processor, device, dtype):
         return_tensors="pt",
         padding="longest"
     )
-    tokens = tokens.to(dtype).to(device)
+    tokens = tokens.to(dtype)
     return tokens
 
 class CollateWrapper:
@@ -58,9 +58,9 @@ def main():
         torch.set_float32_matmul_precision('high')  # Enable TF32 for better performance
 
     # Reduce batch size and number of workers to help with memory issues
-    BATCH_SIZE = 4  # Reduced from 8
+    BATCH_SIZE = 8 
     num_epochs = 20
-    gradient_accumulation_steps = 2  # Increased to maintain effective batch size
+    gradient_accumulation_steps = 1  
     num_workers = 2  # Reduced number of workers
 
     # 1. Load the dataset from the Hub.
@@ -192,7 +192,7 @@ def main():
             return_tensors="pt",
             padding="longest"
         )
-        tokens = tokens.to(DTYPE).to(device)
+        tokens = tokens.to(DTYPE)
         return tokens
 
     # 6. Setup the training arguments.
@@ -236,7 +236,7 @@ def main():
         run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
         eval_steps=500,
-        dataloader_pin_memory=False,  # Disabled pin_memory to reduce memory usage
+        dataloader_pin_memory=True,  # Re-enable pin_memory
         lr_scheduler_type="warmup_stable_decay",
         lr_scheduler_kwargs={
             "num_decay_steps": decay_steps,
