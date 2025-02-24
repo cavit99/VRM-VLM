@@ -99,6 +99,10 @@ def compute_metrics(eval_preds):
 
 def main():
     global processor
+    
+    # Clear CUDA cache before starting to ensure maximum available memory
+    torch.cuda.empty_cache()
+    
     # -------------------------------------------------------
     # Load the PaLiGemma processor.
     # -------------------------------------------------------
