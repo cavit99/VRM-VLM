@@ -68,11 +68,6 @@ def main():
             print(f"Failed to initialize distributed training: {str(e)}")
             raise
 
-    # Add these imports at the top
-    import logging
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-
     # Move BATCH_SIZE definition to top of main()
     BATCH_SIZE = 4
     
@@ -198,6 +193,16 @@ def main():
         torch_dtype=torch.bfloat16
     ).to(device)
 
+    # Create dummy input for warmup pass
+    dummy_text = ["<image>ocr\n"]
+    dummy_image = Image.new('RGB', (448, 448))  # Create blank image of correct size
+    dummy_input = processor(
+        text=dummy_text,
+        images=[dummy_image],
+        return_tensors="pt",
+        padding="longest"
+    ).to(device)
+
     # Warmup pass to initialize CUDA
     print("Performing CUDA warmup pass...")
     with torch.no_grad():
@@ -208,26 +213,6 @@ def main():
 
     model.train()  # Unfreeze entire model.
     DTYPE = model.dtype
-
-    # 5. Define a collate function.
-    def collate_fn(examples):
-        texts = ["<image>ocr\n" for _ in examples]
-        labels = [example["label"] for example in examples]
-        images = []
-        for example in examples:
-            img = example["image"]
-            if isinstance(img, str):
-                img = Image.open(img)
-            images.append(img.convert("RGB"))
-        tokens = processor(
-            text=texts,
-            images=images,
-            suffix=labels,
-            return_tensors="pt",
-            padding="longest"
-        )
-        tokens = tokens.to(DTYPE)
-        return tokens
 
     # 6. Setup the training arguments.
     # Compute steps based on dataset size, batch size, and gradient accumulation
