@@ -13,14 +13,14 @@ import os
 class CustomTrainer(Trainer):
     def create_optimizer(self):
         self.optimizer = torch.optim.AdamW([
-            {"params": self.model.vision_tower.parameters(), "lr": 1.25e-6},  
+            {"params": self.model.vision_tower.parameters(), "lr": 1e-6},  
             {"params": self.model.multi_modal_projector.parameters(), "lr": 5e-6}, 
-            {"params": self.model.language_model.parameters(), "lr": 1.25e-5},  
+            {"params": self.model.language_model.parameters(), "lr": 1e-5},  
         ])
 
 def main():
     # Reduce batch size to help with memory issues
-    BATCH_SIZE = 8  # Reduced from 16
+    BATCH_SIZE = 4  
 
     # Add memory management configuration
     torch.cuda.set_per_process_memory_fraction(0.95)  # Leave some GPU memory free
@@ -129,7 +129,7 @@ def main():
         num_train_epochs=20,
         remove_unused_columns=False,
         per_device_train_batch_size=BATCH_SIZE,
-        gradient_accumulation_steps=4,  # Increased from 2 to maintain effective batch size
+        gradient_accumulation_steps=2, 
         warmup_steps=300,
         weight_decay=1e-6,
         adam_beta2=0.999,
