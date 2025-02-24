@@ -1,4 +1,5 @@
 import torch
+import multiprocessing
 from datasets import load_dataset, Dataset
 from transformers import (
     PaliGemmaProcessor,
@@ -235,4 +236,5 @@ def main():
 
 
 if __name__ == '__main__':
+    multiprocessing.set_start_method('spawn', force=True)
     main() 
