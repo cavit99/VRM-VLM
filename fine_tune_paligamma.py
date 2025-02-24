@@ -30,28 +30,18 @@ def main():
     ds = load_dataset("spawn99/UK-Car-Plate-VRN-Dataset", split="train")
     
     # 2. Convert each row into two examples (one per augmented image).
-    # Each example will contain a field "image" (the augmented image) and "label" (the VRN).
     def split_augmented(example):
-        examples = []
-        # Check if an augmented image exists (it should on both sides)
-        if example.get("augmented_front_plate") is not None:
-            examples.append({
-                "image": example["augmented_front_plate"],
-                "label": example["vrn"]
-            })
-        if example.get("augmented_rear_plate") is not None:
-            examples.append({
-                "image": example["augmented_rear_plate"],
-                "label": example["vrn"]
-            })
-        return examples
+        return [
+            {"image": img, "label": example["vrn"]}
+            for img in (
+                example.get("augmented_front_plate"),
+                example.get("augmented_rear_plate")
+            )
+            if img is not None
+        ]
 
-    # Use map and flatten instead of explode
-    ds_aug = ds.map(
-        split_augmented,
-        remove_columns=ds.column_names,
-        batched=False
-    ).flatten()
+    # Use map and flatten to create individual examples
+    ds_aug = ds.flat_map(split_augmented)
     # After flat_map, we have approximately 15,000 examples.
     # For perfect divisibility by 32, we adjust the splits as follows:
     train_count = 312 * 32   # 312 batches = 9,984 examples for training.
