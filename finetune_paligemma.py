@@ -189,22 +189,25 @@ def main():
         eval_steps=eval_steps,
         dataloader_pin_memory=False,
         lr_scheduler_type="cosine",
-        optim="adamw_hf",
+        optim="adamw_torch",
         dataloader_num_workers=4,
         load_best_model_at_end=True,
-        metric_for_best_model="accuracy",
+        metric_for_best_model="sequence_accuracy",
         greater_is_better=True,
         per_device_train_batch_size=CONFIG["batch_size"],
         per_device_eval_batch_size=CONFIG["batch_size"],
-
+        eval_accumulation_steps=4  
     )
 
-    # Define a custom compute_metrics function to track evaluation metrics
+     # Define a custom compute_metrics function to track evaluation metrics
     def compute_metrics(eval_pred):
         predictions = eval_pred.predictions
-        labels = eval_pred.label_ids
+        labels = eval_pred.label_idsw
+        decoded_predictions = [processor.decode(pred, skip_special_tokens=True).replace("ocr\n", "").strip() for pred in predictions]
+        decoded_labels = [processor.decode(label, skip_special_tokens=True).strip() for label in labels]
+        accuracy = sum(p == l for p, l in zip(decoded_predictions, decoded_labels)) / len(decoded_predictions)
         return {
-            "accuracy": (predictions == labels).mean()
+            "sequence_accuracy": accuracy
         }
 
     trainer = Trainer(
