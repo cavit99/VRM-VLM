@@ -21,6 +21,8 @@ class CustomTrainer(Trainer):
 def main():
     # Reduce batch size to help with memory issues
     BATCH_SIZE = 16  
+    num_epochs = 20
+    gradient_accumulation_steps = 1
 
     # Add memory management configuration
     torch.cuda.set_per_process_memory_fraction(0.95)  # Leave some GPU memory free
@@ -58,19 +60,19 @@ def main():
     print(f"Total available examples: {total_available}")
     
     # Calculate the largest number divisible by both BATCH_SIZE and our split ratio (70/15/15)
-    batches_per_epoch = (total_available // BATCH_SIZE // 20) * 20  # Round down to nearest multiple of 20
+    batches_per_epoch = (total_available // BATCH_SIZE // num_epochs) * num_epochs  # Round down to nearest multiple of epochs
     total_examples = batches_per_epoch * BATCH_SIZE
     
     # Calculate split sizes (70% train, 15% val, 15% test)
-    train_count = (batches_per_epoch * 14 // 20) * BATCH_SIZE  # 70%
-    val_count = (batches_per_epoch * 3 // 20) * BATCH_SIZE    # 15%
-    test_count = (batches_per_epoch * 3 // 20) * BATCH_SIZE   # 15%
+    train_count = (batches_per_epoch * 14 // num_epochs) * BATCH_SIZE  # 70%
+    val_count = (batches_per_epoch * 3 // num_epochs) * BATCH_SIZE    # 15%
+    test_count = (batches_per_epoch * 3 // num_epochs) * BATCH_SIZE   # 15%
     
     # Training steps calculation
-    gradient_accumulation_steps = 2
+    
     effective_batch_size = BATCH_SIZE * gradient_accumulation_steps
     steps_per_epoch = train_count // effective_batch_size
-    total_training_steps = steps_per_epoch * 20  # 20 epochs
+    total_training_steps = steps_per_epoch * num_epochs
     
     # Log all calculations for verification
     print("\nTraining Configuration:")
@@ -135,14 +137,13 @@ def main():
         return tokens
 
     # 6. Setup the training arguments.
-
     # Compute steps based on dataset size, batch size, and gradient accumulation
-    effective_batch_size = BATCH_SIZE * 2  # account for gradient_accumulation_steps=2
+    effective_batch_size = BATCH_SIZE * gradient_accumulation_steps
     steps_per_epoch = len(train_ds) // effective_batch_size
-    total_training_steps = steps_per_epoch * 20  # 20 epochs
+    total_training_steps = steps_per_epoch * num_epochs
     
     # Calculate scheduler steps
-    warmup_steps = total_training_steps // 20  # 5% of total steps for warmup
+    warmup_steps = total_training_steps // num_epochs  # 5% of total steps for warmup
     decay_steps = total_training_steps // 10   # 10% of total steps for decay
     stable_steps = total_training_steps - warmup_steps - decay_steps  # Remaining steps
     
@@ -155,10 +156,10 @@ def main():
     print(f"Stable steps: {stable_steps}")
 
     training_args = TrainingArguments(
-        num_train_epochs=20,
+        num_train_epochs=num_epochs,
         remove_unused_columns=False,
         per_device_train_batch_size=BATCH_SIZE,
-        gradient_accumulation_steps=1,  
+        gradient_accumulation_steps=gradient_accumulation_steps,  
         warmup_steps=warmup_steps,  
         weight_decay=1e-6,
         adam_beta2=0.999,
