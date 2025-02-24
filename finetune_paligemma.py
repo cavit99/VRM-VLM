@@ -214,8 +214,8 @@ def main():
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
         num_train_epochs=3,
-        per_device_train_batch_size=6,
-        per_device_eval_batch_size=6,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
         gradient_accumulation_steps=1,
         eval_strategy="steps",
         save_strategy="steps",
@@ -234,7 +234,7 @@ def main():
         bf16=True,  
         label_names=["labels"],
         dataloader_pin_memory=False,
-        dataloader_num_workers=2,
+        dataloader_num_workers=12,
         eval_accumulation_steps=2,    
     )
     
