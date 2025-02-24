@@ -120,7 +120,8 @@ def main():
         MODEL_ID,
         device_map="auto",
         quantization_config=bnb_config,
-        torch_dtype=torch.bfloat16
+        torch_dtype=torch.bfloat16,
+        attn_implementation="eager"
     )
     
     # -------------------------------------------------------
@@ -157,7 +158,7 @@ def main():
         output_dir=OUTPUT_DIR,
         num_train_epochs=3,
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
+        gradient_accumulation_steps=8,
         eval_strategy="steps",
         save_strategy="steps",
         eval_steps=20,
@@ -166,6 +167,7 @@ def main():
         learning_rate=5e-5,
         optim="adamw_torch",
         weight_decay=1e-6,
+        max_grad_norm=1.0,
         gradient_checkpointing=True,
         adam_beta2=0.999,
         warmup_steps=5,
