@@ -158,6 +158,11 @@ def main():
 
     # Calculate steps for saves and evaluations
     save_steps = num_training_steps // 10  # 10 saves total
+
+    # Ensure save_steps is even to allow eval_steps = save_steps/2 exactly
+    if save_steps % 2 != 0:
+        save_steps += 1
+
     eval_steps = save_steps // 2  # Evaluate twice as frequently as saving
     
     logger.info(f"Total training steps: {num_training_steps}")
