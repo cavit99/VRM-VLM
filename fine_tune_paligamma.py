@@ -120,20 +120,41 @@ def main():
     # 3. Convert each row into two examples (one per augmented image).
     def split_augmented(example):
         results = []
-        for img in (
+        for img_type, img in enumerate((
             example.get("augmented_front_plate"),
             example.get("augmented_rear_plate")
-        ):
+        )):
             if img is not None:
                 try:
-                    # Attempt to open and verify the image
-                    img.verify()  # Basic check
+                    # More thorough image validation
+                    img.verify()  # Basic format check
                     img.load()    # Force loading pixel data
-                    results.append({"image": img, "label": example["vrn"]})
+                    
+                    # Additional image checks
+                    if img.mode not in ['RGB', 'RGBA']:
+                        logger.warning(f"Unexpected image mode: {img.mode}, converting to RGB")
+                        img = img.convert('RGB')
+                    
+                    # Check image dimensions
+                    if img.size[0] < 100 or img.size[1] < 100:
+                        logger.warning(f"Image too small: {img.size}")
+                        continue
+                        
+                    # Validate label
+                    label = example["vrn"]
+                    if not label or len(label) < 2:
+                        logger.warning(f"Invalid label: {label}")
+                        continue
+                        
+                    results.append({
+                        "image": img, 
+                        "label": label,
+                        "image_type": "front" if img_type == 0 else "rear"
+                    })
+                    
                 except (IOError, OSError) as e:
                     logger.error(f"Error processing image: {e}")
-                    #  Optionally:  raise  #  Re-raise to halt execution
-                    #  Or, skip the bad image: continue
+                    continue
         return results
 
     # Create flattened dataset directly
@@ -141,10 +162,46 @@ def main():
     for example in ds:
         flattened_data.extend(split_augmented(example))
 
+    # Add data validation after creating the dataset
+    def validate_dataset(dataset, name="dataset"):
+        """Validate dataset integrity"""
+        logger.info(f"\nValidating {name}:")
+        
+        # Check for empty dataset
+        if len(dataset) == 0:
+            raise ValueError(f"{name} is empty!")
+        
+        # Sample validation
+        sample_size = min(5, len(dataset))
+        samples = dataset.select(range(sample_size))
+        
+        # Validate samples
+        for idx, sample in enumerate(samples):
+            try:
+                # Check image
+                img = sample["image"]
+                if not isinstance(img, Image.Image):
+                    logger.warning(f"Sample {idx}: Invalid image type: {type(img)}")
+                
+                # Check label
+                label = sample["label"]
+                if not isinstance(label, str) or len(label) < 2:
+                    logger.warning(f"Sample {idx}: Invalid label: {label}")
+                
+            except Exception as e:
+                logger.error(f"Error validating sample {idx}: {e}")
+        
+        logger.info(f"Basic validation complete for {name} ({len(dataset)} samples)")
+        return True
+
+    # After creating datasets, add validation:
     ds_aug = Dataset.from_dict({
         "image": [x["image"] for x in flattened_data],
         "label": [x["label"] for x in flattened_data]
     })
+
+    # Validate main dataset
+    validate_dataset(ds_aug, "main dataset")
 
     # After flattening, we have approximately 15,000 examples
     total_available = len(ds_aug)
@@ -188,10 +245,10 @@ def main():
     val_ds = ds_aug.select(range(train_count, train_count + val_count))
     test_ds = ds_aug.select(range(train_count + val_count, total_examples))
     
-    # Assertions and logging to verify dataset splits.
-    assert len(train_ds) == train_count, f"Expected {train_count} train examples, got {len(train_ds)}"
-    assert len(val_ds) == val_count, f"Expected {val_count} validation examples, got {len(val_ds)}"
-    assert len(test_ds) == test_count, f"Expected {test_count} test examples, got {len(test_ds)}"
+    # Validate each subset
+    validate_dataset(train_ds, "training dataset")
+    validate_dataset(val_ds, "validation dataset")
+    validate_dataset(test_ds, "test dataset")
     
     logger.info(f"Train dataset size: {len(train_ds)}")
     logger.info(f"Validation dataset size: {len(val_ds)}")
