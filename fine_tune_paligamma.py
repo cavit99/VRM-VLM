@@ -1,28 +1,34 @@
-import torch
+import logging
+import uuid
 from functools import partial
-import torch._dynamo
+from typing import List, Dict, Any
 
+import torch
 from datasets import load_dataset, Dataset
-
+from peft import get_peft_model, LoraConfig
+from PIL import Image
 from transformers import (
     PaliGemmaProcessor,
     PaliGemmaForConditionalGeneration,
     TrainingArguments,
     Trainer,
-    logging
 )
-from PIL import Image
-import uuid
 
-# Set logging level to reduce verbosity
-#logging.set_verbosity_warning()  
-
-torch._dynamo.config.capture_scalar_outputs = True
-
-logger = logging.get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
-def collate_fn(examples, processor, dtype):
+def collate_fn(examples: List[Dict[str, Any]], processor: PaliGemmaProcessor, dtype: torch.dtype) -> Dict[str, torch.Tensor]:
+    """
+    Collate function for the dataloader that processes examples into model inputs.
+    
+    Args:
+        examples: List of examples containing images and labels
+        processor: PaliGemma processor for tokenization
+        dtype: Torch dtype for tensor conversion
+    
+    Returns:
+        Processed tokens ready for model input
+    """
     texts = ["<image>ocr\n" for _ in examples]
     labels = [example["label"] for example in examples]
     images = []
@@ -31,6 +37,7 @@ def collate_fn(examples, processor, dtype):
         if isinstance(img, str):
             img = Image.open(img)
         images.append(img.convert("RGB"))
+    
     tokens = processor(
         text=texts,
         images=images,
@@ -38,41 +45,19 @@ def collate_fn(examples, processor, dtype):
         return_tensors="pt",
         padding="longest"
     )
-    tokens = tokens.to(dtype)
-    return tokens
+    return tokens.to(dtype)
 
-def main():
-    # Simplified device setup for single GPU
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def prepare_datasets(ds: Dataset) -> tuple[Dataset, Dataset, Dataset]:
+    """
+    Prepare and split datasets for training, validation and testing.
     
-    # Adjusted configurations for better GPU utilization
-    BATCH_SIZE = 8
-    num_epochs = 10
-    gradient_accumulation_steps = 1  # Reduced since we increased batch size
-
-    # 1. Load the dataset from the Hub.
-    # The dataset was previously created with create_dataset.py.
-    # It has 7500 rows with augmented images in the columns:
-    # "augmented_front_plate" and "augmented_rear_plate", and the registration number in "vrn".
-    ds = load_dataset("spawn99/UK-Car-Plate-VRN-Dataset", split="train")
-
-    # 2. Cast the image columns to Image type. This decodes them into PIL Images.
-    # Instead of directly using the Image class, use a function to create images
-    def create_pil_image(img_data):
-        if isinstance(img_data, str):
-            return Image.open(img_data)
-        return img_data
-
-    ds = ds.map(
-        lambda x: {
-            "front_plate": create_pil_image(x["front_plate"]),
-            "rear_plate": create_pil_image(x["rear_plate"]),
-            "augmented_front_plate": create_pil_image(x["augmented_front_plate"]),
-            "augmented_rear_plate": create_pil_image(x["augmented_rear_plate"])
-        }
-    )
-
-    # 3. Convert each row into two examples (one per augmented image).
+    Args:
+        ds: Raw dataset from hub
+        
+    Returns:
+        Tuple of (train_dataset, val_dataset, test_dataset)
+    """
+    # Convert each row into two examples (one per augmented image)
     def split_augmented(example):
         results = []
         for img_type, img in enumerate((
@@ -80,10 +65,8 @@ def main():
             example.get("augmented_rear_plate")
         )):
             if img is not None:
-                # Basic validation
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
-                
                 results.append({
                     "image": img, 
                     "label": example["vrn"],
@@ -91,74 +74,86 @@ def main():
                 })
         return results
 
-    # Create flattened dataset directly
+    # Create flattened dataset
     flattened_data = []
     for example in ds:
         flattened_data.extend(split_augmented(example))
 
-    # Add data validation after creating the dataset
-    def validate_dataset(dataset, name="dataset"):
-        """Validate dataset integrity"""
-        if len(dataset) == 0:
-            raise ValueError(f"{name} is empty!")
-        logger.info(f"Dataset {name}: {len(dataset)} samples")
-        return True
-
-    # After creating datasets, add validation:
     ds_aug = Dataset.from_dict({
         "image": [x["image"] for x in flattened_data],
         "label": [x["label"] for x in flattened_data]
     })
 
-    # Validate main dataset
-    validate_dataset(ds_aug, "main dataset")
-
-    # After flattening, we have approximately 15,000 examples
-    total_available = len(ds_aug)
-    logger.info(f"Total available examples: {total_available}")
-    
-    # Simplify batch size calculations
+    # Split ratios
     total_examples = len(ds_aug)
     train_size = int(0.7 * total_examples)
     val_size = int(0.15 * total_examples)
-    test_size = total_examples - train_size - val_size
-
-    # Split the dataset with shuffling
-    ds_aug = ds_aug.shuffle(seed=42) 
     
-    # Split the dataset directly
+    # Split dataset
+    ds_aug = ds_aug.shuffle(seed=42)
     train_ds = ds_aug.select(range(0, train_size))
     val_ds = ds_aug.select(range(train_size, train_size + val_size))
     test_ds = ds_aug.select(range(train_size + val_size, total_examples))
     
-    # Validate each subset
-    validate_dataset(train_ds, "training dataset")
-    validate_dataset(val_ds, "validation dataset")
-    validate_dataset(test_ds, "test dataset")
-    
-    logger.info(f"Train dataset size: {len(train_ds)}")
-    logger.info(f"Validation dataset size: {len(val_ds)}")
-    logger.info(f"Test dataset size: {len(test_ds)}")
+    # Validate splits
+    for name, dataset in [
+        ("training", train_ds),
+        ("validation", val_ds),
+        ("test", test_ds)
+    ]:
+        logger.info(f"{name.capitalize()} dataset size: {len(dataset)}")
+        if len(dataset) == 0:
+            raise ValueError(f"{name} dataset is empty!")
 
-    # 4. Load the model and processor with eager attention
-    model_id = "google/paligemma2-3b-pt-448"
-    processor = PaliGemmaProcessor.from_pretrained(model_id)
+    return train_ds, val_ds, test_ds
+
+def main():
+    # Configuration
+    CONFIG = {
+        "model_id": "google/paligemma2-3b-pt-448",
+        "batch_size": 4,
+        "num_epochs": 10,
+        "learning_rate": 1e-5,
+        "lora_rank": 8,
+        "lora_dropout": 0.1,
+        "output_dir": "Paligemma2-3B-448-UK-Car-VRN",
+        "repo_name": "UK-Car-Plate-OCR-PaLiGemma"
+    }
     
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Load and prepare datasets
+    ds = load_dataset("spawn99/UK-Car-Plate-VRN-Dataset", split="train")
+    train_ds, val_ds, test_ds = prepare_datasets(ds)
+    
+    # Initialize model and processor
+    processor = PaliGemmaProcessor.from_pretrained(CONFIG["model_id"])
     model = PaliGemmaForConditionalGeneration.from_pretrained(
-        model_id,
+        CONFIG["model_id"],
         torch_dtype=torch.bfloat16,
-        attn_implementation='eager'  # Added eager attention
+        attn_implementation='eager'
     ).to(device)
 
+    # Setup LoRA
+    lora_config = LoraConfig(
+        r=CONFIG["lora_rank"],
+        target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+    
+    # Adjust learning rate for LoRA
+    LEARNING_RATE = CONFIG["learning_rate"]
 
-    model.train()  # Unfreeze entire model.
+    model.train()  
     DTYPE = model.dtype
 
     # 6. Setup the training arguments using a cosine scheduler.
     run_id = str(uuid.uuid4())[:8]
     
     # Calculate total training steps (using floor division)
-    num_training_steps = (len(train_ds) // (BATCH_SIZE * gradient_accumulation_steps)) * num_epochs
+    num_training_steps = (len(train_ds) // CONFIG["batch_size"]) * CONFIG["num_epochs"]
     warmup_steps = num_training_steps // 15
 
     # Calculate steps for saves and evaluations
@@ -170,34 +165,33 @@ def main():
     logger.info(f"Evaluating every {eval_steps} steps")
 
     training_args = TrainingArguments(
-        num_train_epochs=num_epochs,
+        num_train_epochs=CONFIG["num_epochs"],
         remove_unused_columns=False,
-        per_device_train_batch_size=BATCH_SIZE,
-        per_device_eval_batch_size=BATCH_SIZE,
-        gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,
-        learning_rate=2.5e-5,
-        weight_decay=0.01,
+        learning_rate=LEARNING_RATE,  
+        weight_decay=1e-6,
         logging_steps=eval_steps,
         save_strategy="steps",
         save_steps=save_steps,
         save_total_limit=10,
-        output_dir="Paligemma2-3B-448-UK-Car-VRN",
+        output_dir=CONFIG["output_dir"],
         max_grad_norm=1.0,
+        adam_beta2=0.999,
         bf16=True,
         report_to=["wandb"],
         run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
         eval_steps=eval_steps,
-        dataloader_pin_memory=True,
+        dataloader_pin_memory=False,
         lr_scheduler_type="cosine",
-        gradient_checkpointing=True,
-        optim="adamw_torch_fused",
+        optim="adamw_hf",
         dataloader_num_workers=4,
-        torch_compile=True,
         load_best_model_at_end=True,
         metric_for_best_model="accuracy",
         greater_is_better=True,
+        per_device_train_batch_size=CONFIG["batch_size"],
+        per_device_eval_batch_size=CONFIG["batch_size"],
+
     )
 
     # Define a custom compute_metrics function to track evaluation metrics
@@ -230,7 +224,7 @@ def main():
     
     # Push the best model to the Hub
     trainer.push_to_hub(
-        repo_name="UK-Car-Plate-OCR-PaLiGemma",  # Choose your desired repository name
+        repo_name=CONFIG["repo_name"],  # Choose your desired repository name
         commit_message=f"Best model checkpoint - Accuracy: {results.metrics['accuracy']:.4f}",
         blocking=True  # Wait until the upload is complete
     )
