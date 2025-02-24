@@ -44,7 +44,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # Adjusted configurations for better GPU utilization
-    BATCH_SIZE = 5  # Increased from 4 to utilize more GPU memory
+    BATCH_SIZE = 6
     num_epochs = 10
     gradient_accumulation_steps = 1  # Reduced since we increased batch size
 
