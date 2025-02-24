@@ -1,5 +1,6 @@
 import torch
 from functools import partial
+import torch._dynamo
 
 from datasets import load_dataset, Dataset
 
@@ -16,6 +17,7 @@ import uuid
 # Set logging level to reduce verbosity
 #logging.set_verbosity_warning()  
 
+torch._dynamo.config.capture_scalar_outputs = True
 
 logger = logging.get_logger(__name__)
 
@@ -44,7 +46,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # Adjusted configurations for better GPU utilization
-    BATCH_SIZE = 6
+    BATCH_SIZE = 8
     num_epochs = 10
     gradient_accumulation_steps = 1  # Reduced since we increased batch size
 
