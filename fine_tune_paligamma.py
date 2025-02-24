@@ -56,12 +56,11 @@ def main():
         torch.cuda.empty_cache()
         torch.set_float32_matmul_precision('high')  # Enable TF32 for better performance
 
-    # Reduce batch size and number of workers to help with memory issues
-    BATCH_SIZE = 8 
+    # Adjust batch size for multi-GPU setup
+    BATCH_SIZE = 4  # Reduced per-GPU batch size (will be multiplied by number of GPUs)
     num_epochs = 20
-    gradient_accumulation_steps = 1  
-    num_workers = min(4, os.cpu_count()//2)  # Example: 4 workers
-    torch.backends.cudnn.benchmark = True
+    gradient_accumulation_steps = 1
+    num_workers = min(4, os.cpu_count()//2)  # Workers per GPU
 
     # 1. Load the dataset from the Hub.
     # The dataset was previously created with create_dataset.py.
@@ -218,7 +217,8 @@ def main():
     training_args = TrainingArguments(
         num_train_epochs=num_epochs,
         remove_unused_columns=False,
-        per_device_train_batch_size=BATCH_SIZE,
+        per_device_train_batch_size=BATCH_SIZE,  # This is now per GPU
+        per_device_eval_batch_size=BATCH_SIZE,   # Add explicit eval batch size
         gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,  
         weight_decay=1e-6,
@@ -235,7 +235,7 @@ def main():
         run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
         eval_steps=500,
-        dataloader_pin_memory=True,  # Re-enable pin_memory
+        dataloader_pin_memory=True,
         lr_scheduler_type="warmup_stable_decay",
         lr_scheduler_kwargs={
             "num_decay_steps": decay_steps,
@@ -245,7 +245,10 @@ def main():
         dataloader_num_workers=num_workers,
         ddp_find_unused_parameters=False,
         dataloader_drop_last=True,
-        gradient_checkpointing=True 
+        gradient_checkpointing=True,
+        # Add multi-GPU specific arguments
+        local_rank=-1,                  # Required for distributed training
+        parallel_mode="distributed",    # Enable distributed mode
     )
 
     # 7. Initialize the custom Trainer with training and evaluation datasets.
