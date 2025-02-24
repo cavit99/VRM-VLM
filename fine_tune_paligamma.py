@@ -45,18 +45,21 @@ def main():
             if img is not None
         ]
 
+    # Create flattened dataset directly
     flattened_data = []
     for example in ds:
         flattened_data.extend(split_augmented(example))
+    
     ds_aug = Dataset.from_dict({
         "image": [x["image"] for x in flattened_data],
         "label": [x["label"] for x in flattened_data]
     })
-    # After flat_map, we have approximately 15,000 examples.
+
+    # After flattening, we have approximately 15,000 examples.
     # For perfect divisibility by BATCH_SIZE, we adjust the splits as follows:
-    train_count = 312 * BATCH_SIZE   # 312 batches = 9,984 examples for training.
-    val_count   = 62 * BATCH_SIZE      # 62 batches = 1,984 examples for validation.
-    test_count  = 62 * BATCH_SIZE      # 62 batches = 1,984 examples for testing.
+    train_count = 312 * BATCH_SIZE   # 312 batches = 9,984 examples for training
+    val_count = 62 * BATCH_SIZE      # 62 batches = 1,984 examples for validation
+    test_count = 62 * BATCH_SIZE     # 62 batches = 1,984 examples for testing
     total_examples = train_count + val_count + test_count  # = 13,952 examples
 
     ds_aug = ds_aug.shuffle(seed=42)
