@@ -62,29 +62,22 @@ def load_and_prepare_dataset(subset_ratio=1.0):
     return train_ds, valid_ds, test_ds
 
 def collate_fn(batch):
-    """
-    Custom collate function to prepare a batch of examples for PaliGemma2.
-    
-    For each example we:
-      - Use the image as the visual input
-      - Use the prompt as the text prefix (e.g., "ocr")
-      - Use the target (VRN) as the suffix (expected output)
-    """
-    images = [sample["image"] for sample in batch]
-    prompts = ["<image> " + sample["prompt"] for sample in batch]  # results in "<image> ocr"
-    targets = [sample["target"] for sample in batch]
-    
-    # Process inputs with suffix parameter to generate labels automatically
+    images, labels = zip(*batch)
+
+    # Extract prompts and annotations.
+    prefixes = ["<image>" + label["prefix"] for label in labels]
+    suffixes = [label["suffix"] for label in labels]
+
+    # Process the inputs using the processor.
     inputs = processor(
-        text=prompts, 
-        images=images, 
-        suffix=targets,  
-        return_tensors="pt", 
+        text=prefixes,
+        images=images,
+        return_tensors="pt",
+        suffix=suffixes,
         padding="longest"
     )
     
-    # Move the entire input batch to the target device
-    inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
+    # Do not move the data to GPU here.
     return inputs
 
 def compute_metrics(eval_preds):
