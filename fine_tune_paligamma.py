@@ -158,7 +158,7 @@ def main():
         num_train_epochs=num_epochs,
         remove_unused_columns=False,
         per_device_train_batch_size=BATCH_SIZE,
-        per_device_eval_batch_size=BATCH_SIZE * 2,  # Increased eval batch size
+        per_device_eval_batch_size=BATCH_SIZE * 2,
         gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,
         learning_rate=2.5e-5,
@@ -176,11 +176,10 @@ def main():
         dataloader_pin_memory=True,
         lr_scheduler_type="cosine",
         gradient_checkpointing=True,
-        group_by_length=True,  # Enable group by length for more efficient batching
         optim="adamw_torch_fused",
         fp16_full_eval=True,
-        dataloader_num_workers=4,  # Add multiple workers for data loading
-        torch_compile=True,  # Enable torch compile for potential speedup
+        dataloader_num_workers=4,
+        torch_compile=True,
     )
 
     trainer = Trainer(
