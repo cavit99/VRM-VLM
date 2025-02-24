@@ -1,10 +1,6 @@
 import torch
-torch.set_float32_matmul_precision('high')  # Enable TF32 tensor cores for float32 matrix multiplication
 
 from datasets import load_dataset, Dataset
-import os
-# Set OpenMP threads before other imports
-os.environ["OMP_NUM_THREADS"] = "1"
 
 from transformers import (
     PaliGemmaProcessor,
@@ -15,8 +11,7 @@ from transformers import (
 )
 from PIL import Image
 import uuid
-import datetime
-from torch.distributed.elastic.multiprocessing.errors import record
+
 
 # Set a global verbosity level (INFO, DEBUG, etc.)
 logging.set_verbosity_info()
@@ -24,7 +19,7 @@ logger = logging.get_logger(__name__)
 
 
 # Move both collate functions outside of main() to make them pickleable
-def collate_fn(examples, processor, device, dtype):
+def collate_fn(examples, processor, dtype):
     texts = ["<image>ocr\n" for _ in examples]
     labels = [example["label"] for example in examples]
     images = []
@@ -44,56 +39,27 @@ def collate_fn(examples, processor, device, dtype):
     return tokens
 
 class CollateWrapper:
-    def __init__(self, processor, device, dtype):
+    def __init__(self, processor, dtype):
         self.processor = processor
-        self.device = device
         self.dtype = dtype
     
     def __call__(self, examples):
-        return collate_fn(examples, self.processor, self.device, self.dtype)
+        return collate_fn(examples, self.processor, self.dtype)
 
-@record
 def main():
-    # Initialize process group with better error handling
-    local_rank = int(os.environ.get("LOCAL_RANK", -1))
-    world_size = int(os.environ.get("WORLD_SIZE", 1))
-
-    if local_rank != -1:
-        try:
-            torch.distributed.init_process_group(
-                backend="nccl",
-                init_method="env://",
-                timeout=datetime.timedelta(minutes=15)
-            )
-            torch.cuda.set_device(local_rank)
-            logger.info(f"Initialized process group for rank {local_rank} of {world_size}")
-        except Exception as e:
-            logger.error(f"Failed to initialize distributed training: {str(e)}")
-            raise
-
-    # Move BATCH_SIZE definition to top of main()
+    # Simplified device setup for single GPU
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Basic configurations
     BATCH_SIZE = 2
-    
-    # Adjust device assignment
-    device = torch.device("cuda", local_rank) if torch.cuda.is_available() else "cpu"
-    
-    # Scale batch size by world size
-    global_batch_size = BATCH_SIZE * world_size
-    
-    # Only print on main process
-    if local_rank <= 0:
-        logger.info(f"Running with {world_size} GPUs")
-        logger.info(f"Global batch size: {global_batch_size}")
-    
-    # Memory and CUDA optimizations
-    if device == "cuda":
-        torch.backends.cudnn.benchmark = True
-        torch.cuda.empty_cache()
-
-    # Adjust batch size for multi-GPU setup
     num_epochs = 20
     gradient_accumulation_steps = 1
-    num_workers = min(4, os.cpu_count()//2)  # Workers per GPU
+    num_workers = 4  
+
+    # Memory and CUDA optimizations
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+        torch.cuda.empty_cache()
 
     # 1. Load the dataset from the Hub.
     # The dataset was previously created with create_dataset.py.
@@ -125,36 +91,15 @@ def main():
             example.get("augmented_rear_plate")
         )):
             if img is not None:
-                try:
-                    # More thorough image validation
-                    img.verify()  # Basic format check
-                    img.load()    # Force loading pixel data
-                    
-                    # Additional image checks
-                    if img.mode not in ['RGB', 'RGBA']:
-                        logger.warning(f"Unexpected image mode: {img.mode}, converting to RGB")
-                        img = img.convert('RGB')
-                    
-                    # Check image dimensions
-                    if img.size[0] < 100 or img.size[1] < 100:
-                        logger.warning(f"Image too small: {img.size}")
-                        continue
-                        
-                    # Validate label
-                    label = example["vrn"]
-                    if not label or len(label) < 2:
-                        logger.warning(f"Invalid label: {label}")
-                        continue
-                        
-                    results.append({
-                        "image": img, 
-                        "label": label,
-                        "image_type": "front" if img_type == 0 else "rear"
-                    })
-                    
-                except (IOError, OSError) as e:
-                    logger.error(f"Error processing image: {e}")
-                    continue
+                # Basic validation
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                results.append({
+                    "image": img, 
+                    "label": example["vrn"],
+                    "image_type": "front" if img_type == 0 else "rear"
+                })
         return results
 
     # Create flattened dataset directly
@@ -165,33 +110,9 @@ def main():
     # Add data validation after creating the dataset
     def validate_dataset(dataset, name="dataset"):
         """Validate dataset integrity"""
-        logger.info(f"\nValidating {name}:")
-        
-        # Check for empty dataset
         if len(dataset) == 0:
             raise ValueError(f"{name} is empty!")
-        
-        # Sample validation
-        sample_size = min(5, len(dataset))
-        samples = dataset.select(range(sample_size))
-        
-        # Validate samples
-        for idx, sample in enumerate(samples):
-            try:
-                # Check image
-                img = sample["image"]
-                if not isinstance(img, Image.Image):
-                    logger.warning(f"Sample {idx}: Invalid image type: {type(img)}")
-                
-                # Check label
-                label = sample["label"]
-                if not isinstance(label, str) or len(label) < 2:
-                    logger.warning(f"Sample {idx}: Invalid label: {label}")
-                
-            except Exception as e:
-                logger.error(f"Error validating sample {idx}: {e}")
-        
-        logger.info(f"Basic validation complete for {name} ({len(dataset)} samples)")
+        logger.info(f"Dataset {name}: {len(dataset)} samples")
         return True
 
     # After creating datasets, add validation:
@@ -207,43 +128,16 @@ def main():
     total_available = len(ds_aug)
     logger.info(f"Total available examples: {total_available}")
     
-    # Calculate the largest number divisible by both BATCH_SIZE and our split ratio (70/15/15)
-    batches_per_epoch = (total_available // BATCH_SIZE // num_epochs) * num_epochs  # Round down to nearest multiple of epochs
-    total_examples = batches_per_epoch * BATCH_SIZE
-    
-    # Calculate split sizes (70% train, 15% val, 15% test)
-    train_count = (batches_per_epoch * 14 // num_epochs) * BATCH_SIZE  # 70%
-    val_count = (batches_per_epoch * 3 // num_epochs) * BATCH_SIZE    # 15%
-    test_count = (batches_per_epoch * 3 // num_epochs) * BATCH_SIZE   # 15%
-    
-    # Training steps calculation
-    
-    effective_batch_size = BATCH_SIZE * gradient_accumulation_steps
-    steps_per_epoch = train_count // effective_batch_size
-    total_training_steps = steps_per_epoch * num_epochs
-    
-    # Use standard cosine scheduler instead of the custom scheduler.
-    warmup_steps = total_training_steps // num_epochs  # Approx. 5% of total steps for warmup
+    # Simplify batch size calculations
+    total_examples = len(ds_aug)
+    train_size = int(0.7 * total_examples)
+    val_size = int(0.15 * total_examples)
+    test_size = total_examples - train_size - val_size
 
-    logger.info("\nTraining Configuration:")
-    logger.info(f"Total batches per epoch: {batches_per_epoch}")
-    logger.info(f"Batch size: {BATCH_SIZE}")
-    logger.info(f"Gradient accumulation steps: {gradient_accumulation_steps}")
-    logger.info(f"Effective batch size: {effective_batch_size}")
-    logger.info(f"Steps per epoch: {steps_per_epoch}")
-    logger.info(f"Total training steps: {total_training_steps}")
-    logger.info(f"Warmup steps: {warmup_steps}")
-
-    ds_aug = ds_aug.shuffle(seed=42)
-    ds_aug = ds_aug.select(range(total_examples))
-    
-    # Log the total number of examples selected.
-    logger.info(f"Total examples selected: {total_examples}")
-
-    # Split the dataset.
-    train_ds = ds_aug.select(range(0, train_count))
-    val_ds = ds_aug.select(range(train_count, train_count + val_count))
-    test_ds = ds_aug.select(range(train_count + val_count, total_examples))
+    # Split the dataset directly
+    train_ds = ds_aug.select(range(0, train_size))
+    val_ds = ds_aug.select(range(train_size, train_size + val_size))
+    test_ds = ds_aug.select(range(train_size + val_size, total_examples))
     
     # Validate each subset
     validate_dataset(train_ds, "training dataset")
@@ -286,6 +180,10 @@ def main():
 
     # 6. Setup the training arguments using a cosine scheduler.
     run_id = str(uuid.uuid4())[:8]
+    
+    # Calculate warmup steps (typically 10% of total steps)
+    num_training_steps = (len(train_ds) // (BATCH_SIZE * gradient_accumulation_steps)) * num_epochs
+    warmup_steps = num_training_steps // 10
 
     training_args = TrainingArguments(
         num_train_epochs=num_epochs,
@@ -293,28 +191,34 @@ def main():
         per_device_train_batch_size=BATCH_SIZE,
         per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=gradient_accumulation_steps,
-        warmup_steps=warmup_steps,  
-        learning_rate=2e-5, 
-        weight_decay=1e-6,
+        warmup_steps=warmup_steps,
+        learning_rate=5e-6,  # Reduced from 2e-5 for more stable fine-tuning
+        weight_decay=0.01,   # Increased for better regularization
         adam_beta2=0.999,
         logging_steps=100,
         save_strategy="steps",
         save_steps=1000,
         save_total_limit=3,
         output_dir="Paligemma2-3B-448-UK-Car-VRN",
-        max_grad_norm=1.0,            
-        label_smoothing_factor=0.1,    
+        max_grad_norm=1.0,
+        label_smoothing_factor=0.1,
         bf16=True,
         report_to=["wandb"],
         run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
         eval_steps=500,
         dataloader_pin_memory=True,
-        lr_scheduler_type="cosine",  # Use standard cosine scheduler.
+        lr_scheduler_type="cosine",
         dataloader_num_workers=num_workers,
-        ddp_find_unused_parameters=False,
         dataloader_drop_last=True,
         gradient_checkpointing=True,
+        # Added parameters for better training stability
+        fp16_full_eval=False,          # Avoid potential precision issues during evaluation
+        group_by_length=True,          # Reduces padding, improves efficiency
+        prediction_loss_only=True,     # Focus on training loss for this task
+        load_best_model_at_end=True,   # Load best checkpoint at end of training
+        metric_for_best_model="loss",  # Use loss as metric for best model
+        greater_is_better=False,       # Lower loss is better
     )
 
     # 7. Initialize the Trainer with training and evaluation datasets.
@@ -322,7 +226,7 @@ def main():
         model=model,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        data_collator=CollateWrapper(processor, device, DTYPE),
+        data_collator=CollateWrapper(processor, DTYPE),
         args=training_args,
     )
 
@@ -338,12 +242,4 @@ def main():
 
 
 if __name__ == '__main__':
-    try:
-        torch.multiprocessing.set_sharing_strategy('file_system')
-        main()
-    except Exception as e:
-        logger.error(f"Error in main: {str(e)}")
-        # Make sure to clean up distributed process group
-        if torch.distributed.is_initialized():
-            torch.distributed.destroy_process_group()
-        raise 
+    main() 
