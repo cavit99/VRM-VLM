@@ -154,12 +154,14 @@ def main():
 
     # Log model layer type (for debugging)
     layer = None
-    if hasattr(model, "model") and hasattr(model.model, "layers"):
-        layer = model.model.layers[0]
-    elif hasattr(model, "decoder") and hasattr(model.decoder, "layers"):
-        layer = model.decoder.layers[0]
-    elif hasattr(model, "transformer") and hasattr(model.transformer, "h"):
-        layer = model.transformer.h[0]
+    if hasattr(model, "language_model"):
+        language_model = model.language_model
+        if hasattr(language_model, "model") and hasattr(language_model.model, "layers"):
+            layer = language_model.model.layers[0]
+        elif hasattr(language_model, "decoder") and hasattr(language_model.decoder, "layers"):
+            layer = language_model.decoder.layers[0]
+        elif hasattr(language_model, "transformer") and hasattr(language_model.transformer, "h"):
+            layer = language_model.transformer.h[0]
 
     if layer is not None:
         logger.info(f"Model layer type: {type(layer)}")
