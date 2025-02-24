@@ -19,7 +19,7 @@ class CustomTrainer(Trainer):
             {"params": self.model.multi_modal_projector.parameters(), "lr": 2e-5},
             # LLM head: higher LR for refining text generation.
             {"params": self.model.language_model.parameters(), "lr": 5e-5},
-        ], max_grad_norm=1.0)  # Add gradient clipping to prevent exploding gradients
+        ])  # Remove max_grad_norm from here
         return optimizer
 
 def main():
