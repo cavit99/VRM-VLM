@@ -13,8 +13,10 @@ from transformers import (
 from PIL import Image
 import uuid
 
+# Set logging level to reduce verbosity
+logging.set_verbosity_warning()  
 
-logging.set_verbosity_info()
+
 logger = logging.get_logger(__name__)
 
 
