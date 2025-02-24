@@ -11,16 +11,11 @@ from PIL import Image
 # Define a custom Trainer that applies layer-specific learning rates.
 class CustomTrainer(Trainer):
     def create_optimizer(self):
-        # Build the optimizer with three parameter groups.
-        optimizer = torch.optim.AdamW([
-            # Vision encoder: very low LR to gently adjust visual features.
+        self.optimizer = torch.optim.AdamW([
             {"params": self.model.vision_tower.parameters(), "lr": 5e-6},
-            # Multi-modal projector: moderate LR for alignment tuning.
             {"params": self.model.multi_modal_projector.parameters(), "lr": 2e-5},
-            # LLM head: higher LR for refining text generation.
             {"params": self.model.language_model.parameters(), "lr": 5e-5},
-        ]) 
-        return optimizer
+        ])
 
 def main():
     # Define batch size parameter for easy adjustment.
