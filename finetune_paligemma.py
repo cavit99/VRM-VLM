@@ -96,15 +96,18 @@ def prepare_datasets(ds: Dataset) -> tuple[Dataset, Dataset, Dataset]:
         if len(dataset) == 0:
             raise ValueError(f"{name} dataset is empty!")
 
+    # Add cleanup
+    ds_aug = ds_aug.cleanup_cache_files()
+
     return train_ds, val_ds, test_ds
 
 def main():
     # Configuration
     CONFIG = {
         "model_id": "google/paligemma2-3b-pt-448",
-        "batch_size": 1,
-        "num_epochs": 1,  # for testing
-        "gradient_accumulation_steps": 16,
+        "batch_size": 16,
+        "num_epochs": 1,
+        "gradient_accumulation_steps": 1,
         "learning_rate": 1e-5,
         "lora_rank": 8,
         "lora_dropout": 0.1,
@@ -120,6 +123,10 @@ def main():
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
+    # Add this before model loading
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    
     # Load and prepare datasets
     ds = load_dataset("spawn99/UK-Car-Plate-VRN-Dataset", split="train")
     train_ds, val_ds, test_ds = prepare_datasets(ds)
@@ -133,7 +140,8 @@ def main():
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type=CONFIG.get("bnb_quant_type", "nf4"),
-            bnb_4bit_compute_type=torch.bfloat16,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
         )
         model = PaliGemmaForConditionalGeneration.from_pretrained(
             CONFIG["model_id"],
@@ -218,7 +226,7 @@ def main():
         save_steps=save_steps,
         save_total_limit=5,
         output_dir=CONFIG["output_dir"],
-        max_grad_norm=1.0,
+        max_grad_norm=0.3,
         bf16=True,
         report_to=["wandb"],
         run_name=f"paligemma-vrn-{run_id}",
@@ -226,15 +234,16 @@ def main():
         eval_steps=eval_steps,
         dataloader_pin_memory=False,
         lr_scheduler_type="cosine",
-        optim="adamw_torch",
+        optim="adamw_8bit",
         dataloader_num_workers=4,
         load_best_model_at_end=True,
         metric_for_best_model="accuracy",
         greater_is_better=True,
-        per_device_train_batch_size=CONFIG["batch_size"],  
-        per_device_eval_batch_size=CONFIG["batch_size"],   
+        per_device_train_batch_size=CONFIG["batch_size"],
+        per_device_eval_batch_size=CONFIG["batch_size"],
         gradient_accumulation_steps=CONFIG["gradient_accumulation_steps"],
-        eval_accumulation_steps=4
+        eval_accumulation_steps=1,
+        gradient_checkpointing=True,
     )
 
      # Define a custom compute_metrics function to track evaluation metrics
