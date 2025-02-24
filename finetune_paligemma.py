@@ -153,11 +153,18 @@ def main():
         param.requires_grad = False
 
     # Log model layer type (for debugging)
-    if hasattr(model, "model"):
+    layer = None
+    if hasattr(model, "model") and hasattr(model.model, "layers"):
         layer = model.model.layers[0]
+    elif hasattr(model, "decoder") and hasattr(model.decoder, "layers"):
+        layer = model.decoder.layers[0]
+    elif hasattr(model, "transformer") and hasattr(model.transformer, "h"):
+        layer = model.transformer.h[0]
+
+    if layer is not None:
+        logger.info(f"Model layer type: {type(layer)}")
     else:
-        layer = model.layers[0]
-    logger.info(f"Model layer type: {type(layer)}")
+        logger.warning("Unable to log model layer type: no recognized layer attribute found.")
     
     # Setup LoRA configuration and wrap the model (works with both 4-bit and full precision)
     lora_config = LoraConfig(
