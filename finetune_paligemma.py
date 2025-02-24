@@ -170,6 +170,7 @@ def main():
         save_total_limit=1,
         remove_unused_columns=False,
         bf16=True,
+        label_names=["labels"],
     )
     
     # -------------------------------------------------------
@@ -182,7 +183,6 @@ def main():
         eval_dataset=valid_ds,
         data_collator=collate_fn,
         compute_metrics=compute_metrics,
-        label_names=["labels"],
     )
     
     # -------------------------------------------------------
