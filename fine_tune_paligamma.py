@@ -44,18 +44,14 @@ def main():
                 "image": example["augmented_rear_plate"],
                 "label": example["vrn"]
             })
-        return {
-            "image": [ex["image"] for ex in examples],
-            "label": [ex["label"] for ex in examples]
-        }
+        return examples
 
-    # Use map instead of flat_map and then explode the columns
+    # Use map and flatten instead of explode
     ds_aug = ds.map(
         split_augmented,
         remove_columns=ds.column_names,
         batched=False
-    )
-    ds_aug = ds_aug.explode(["image", "label"])
+    ).flatten()
     # After flat_map, we have approximately 15,000 examples.
     # For perfect divisibility by 32, we adjust the splits as follows:
     train_count = 312 * 32   # 312 batches = 9,984 examples for training.
@@ -119,6 +115,9 @@ def main():
         label_smoothing_factor=0.1,    
         bf16=True,
         report_to=["wandb"],
+        run_name="paligemma-vrn-finetune",  # Add a descriptive run name
+        evaluation_strategy="steps",    # Add evaluation strategy
+        eval_steps=500,                # Add evaluation frequency
         dataloader_pin_memory=False,
         lr_scheduler_type="warmup_stable_decay", 
     )
