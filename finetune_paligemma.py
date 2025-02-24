@@ -136,6 +136,7 @@ def main():
             attn_implementation="eager",
             quantization_config=bnb_config,
             torch_dtype=torch.bfloat16,
+            device_map={"": f"cuda:{torch.cuda.current_device()}"}
         )
     else:
         model = PaliGemmaForConditionalGeneration.from_pretrained(
@@ -143,10 +144,10 @@ def main():
             attn_implementation="eager"
         )
     
-
+    # Freeze parts of vision_tower, multi_modal_projector, etc.
     for param in model.vision_tower.parameters():
         param.requires_grad = False
-
+    
     for param in model.multi_modal_projector.parameters():
         param.requires_grad = False
 
@@ -255,6 +256,7 @@ def main():
         data_collator=partial(collate_fn, processor=processor, dtype=DTYPE),
         args=training_args,
         compute_metrics=compute_metrics,
+        label_names=["labels"],
     )
 
     # 8. Launch training.
