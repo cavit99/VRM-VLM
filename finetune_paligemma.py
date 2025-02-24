@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 def collate_fn(examples: List[Dict[str, Any]],
                processor: PaliGemmaProcessor,
-               device: torch.device,
                dtype: torch.dtype) -> Dict[str, torch.Tensor]:
     """
     Collate function that processes the examples and sends floating-point tensors (like
@@ -41,14 +40,9 @@ def collate_fn(examples: List[Dict[str, Any]],
         padding="longest"
     )
     
-    # Send tensors to the device.
-    tokens = {key: tensor.to(device) for key, tensor in tokens.items()}
-    
-    # Convert only the pixel_values (if present) to the desired dtype.
+    # Do not move tensors to GPU here. The Trainer will handle moving data to the proper device.
     if "pixel_values" in tokens:
         tokens["pixel_values"] = tokens["pixel_values"].to(dtype)
-    
-    # Ensure that label tensors remain as integers.
     if "labels" in tokens:
         tokens["labels"] = tokens["labels"].long()
     
@@ -284,7 +278,7 @@ def main():
         model=model,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        data_collator=partial(collate_fn, processor=processor, device=device, dtype=DTYPE),
+        data_collator=partial(collate_fn, processor=processor, dtype=DTYPE),
         args=training_args,
         compute_metrics=compute_metrics,
     )
