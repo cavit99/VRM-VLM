@@ -123,7 +123,7 @@ def main():
         num_train_epochs=20,          
         remove_unused_columns=False,
         per_device_train_batch_size=BATCH_SIZE, 
-        warmup_steps=300,
+        warmup_steps=300,  # Mandatory warmup steps!
         weight_decay=1e-6,
         adam_beta2=0.999,
         logging_steps=100,
@@ -142,9 +142,10 @@ def main():
         lr_scheduler_type="warmup_stable_decay",
         # Pass additional scheduler arguments so that the scheduler has all required inputs.
         lr_scheduler_kwargs={
-            "num_training_steps": num_train_steps,
-            "num_decay_steps": num_train_steps - 300  # decay steps after warmup.
-        }
+            "num_decay_steps": 624,
+            "num_stable_steps": 5316,
+            "min_lr_ratio": 0.1
+       }
     )
 
     # 7. Initialize the custom Trainer with training and evaluation datasets.
