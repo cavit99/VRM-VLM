@@ -1,5 +1,5 @@
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 from transformers import (
     PaliGemmaProcessor,
     PaliGemmaForConditionalGeneration,
@@ -31,6 +31,8 @@ def main():
     # It has 7500 rows with augmented images in the columns:
     # "augmented_front_plate" and "augmented_rear_plate", and the registration number in "vrn".
     ds = load_dataset("spawn99/UK-Car-Plate-VRN-Dataset", split="train")
+    print(type(ds))
+    print(dir(ds))  # List all available methods and properties
     
     # 2. Convert each row into two examples (one per augmented image).
     def split_augmented(example):
@@ -43,8 +45,13 @@ def main():
             if img is not None
         ]
 
-    # Use flat_map to create individual examples.
-    ds_aug = ds.flat_map(split_augmented)
+    flattened_data = []
+    for example in ds:
+        flattened_data.extend(split_augmented(example))
+    ds_aug = Dataset.from_dict({
+        "image": [x["image"] for x in flattened_data],
+        "label": [x["label"] for x in flattened_data]
+    })
     # After flat_map, we have approximately 15,000 examples.
     # For perfect divisibility by BATCH_SIZE, we adjust the splits as follows:
     train_count = 312 * BATCH_SIZE   # 312 batches = 9,984 examples for training.
