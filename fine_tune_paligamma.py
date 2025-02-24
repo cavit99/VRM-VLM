@@ -31,23 +31,31 @@ def main():
     
     # 2. Convert each row into two examples (one per augmented image).
     # Each example will contain a field "image" (the augmented image) and "label" (the VRN).
-    # We use flat_map so that each row is expanded into one or two examples.
     def split_augmented(example):
-        new_examples = []
+        examples = []
         # Check if an augmented image exists (it should on both sides)
         if example.get("augmented_front_plate") is not None:
-            new_examples.append({
+            examples.append({
                 "image": example["augmented_front_plate"],
                 "label": example["vrn"]
             })
         if example.get("augmented_rear_plate") is not None:
-            new_examples.append({
+            examples.append({
                 "image": example["augmented_rear_plate"],
                 "label": example["vrn"]
             })
-        return new_examples
+        return {
+            "image": [ex["image"] for ex in examples],
+            "label": [ex["label"] for ex in examples]
+        }
 
-    ds_aug = ds.flat_map(split_augmented)
+    # Use map instead of flat_map and then explode the columns
+    ds_aug = ds.map(
+        split_augmented,
+        remove_columns=ds.column_names,
+        batched=False
+    )
+    ds_aug = ds_aug.explode(["image", "label"])
     # After flat_map, we have approximately 15,000 examples.
     # For perfect divisibility by 32, we adjust the splits as follows:
     train_count = 312 * 32   # 312 batches = 9,984 examples for training.
