@@ -204,7 +204,7 @@ def main():
     # -------------------------------------------------------
     train_ds, valid_ds, test_ds = load_and_prepare_dataset(subset_ratio=0.1)
     
-    # Use a very small validation dataset to prevent OOM
+
     valid_ds = valid_ds.select(range(min(50, len(valid_ds))))
     test_ds = test_ds.select(range(min(50, len(test_ds))))
     
@@ -214,9 +214,9 @@ def main():
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
         num_train_epochs=3,
-        per_device_train_batch_size=1,
-        per_device_eval_batch_size=1,
-        gradient_accumulation_steps=8,
+        per_device_train_batch_size=2,
+        per_device_eval_batch_size=2,
+        gradient_accumulation_steps=4,
         eval_strategy="steps",
         save_strategy="steps",
         eval_steps=20,
