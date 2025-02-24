@@ -162,6 +162,7 @@ def main():
         output_dir=OUTPUT_DIR,
         num_train_epochs=3,
         per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
         gradient_accumulation_steps=12,
         eval_strategy="steps",
         save_strategy="steps",
