@@ -81,7 +81,9 @@ def collate_fn(batch):
     if "labels" not in inputs and "input_ids" in inputs:
         inputs["labels"] = inputs["input_ids"].clone()
     
-    # Do not move the data to GPU here.
+    # Move inputs to device here (this is optional as Trainer will do it)
+    # inputs = {k: v.to(DEVICE) for k, v in inputs.items() if isinstance(v, torch.Tensor)}
+    
     return inputs
 
 def compute_metrics(eval_preds):
@@ -145,6 +147,10 @@ def main():
     original_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model trainable parameters before LoRA: {original_trainable}")
     
+    # Set use_cache=False explicitly before creating PEFT model
+    model.config.use_cache = False
+    
+    # Create the PEFT model
     model = get_peft_model(model, lora_config)
     print(f"PEFT model created with config: {lora_config}")
     
@@ -157,6 +163,22 @@ def main():
     if hasattr(model, "multi_modal_projector"):
         for param in model.multi_modal_projector.parameters():
             param.requires_grad = False
+    
+    # Ensure LoRA parameters are trainable
+    for name, param in model.named_parameters():
+        if 'lora' in name:
+            param.requires_grad = True
+    
+    # Set model to train mode
+    model.train()
+    
+    # Check trainable parameters
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Model has {trainable_params} trainable parameters")
+    
+    # If trainable_params is 0, raise an error
+    if trainable_params == 0:
+        raise ValueError("No trainable parameters found. Cannot train the model.")
     
     model.to(DEVICE)
     
@@ -197,25 +219,6 @@ def main():
     # -------------------------------------------------------
     # Initialize the Trainer.
     # -------------------------------------------------------
-    
-    # Before training, check that we have trainable parameters
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model has {trainable_params} trainable parameters")
-    
-    # If trainable_params is 0, explicitly mark LoRA parameters as trainable
-    if trainable_params == 0:
-        print("No trainable parameters found, forcing LoRA parameters to be trainable")
-        for name, param in model.named_parameters():
-            if 'lora' in name:
-                param.requires_grad = True
-        
-        # Check again
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"After fixing: Model has {trainable_params} trainable parameters")
-    
-    # Only proceed with training if we have trainable parameters
-    if trainable_params == 0:
-        raise ValueError("No trainable parameters found. Cannot train the model.")
     
     trainer = Trainer(
         model=model,
