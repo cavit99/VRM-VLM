@@ -4,6 +4,7 @@ import uuid
 import gc
 from datasets import load_dataset, Dataset
 from transformers import Trainer, TrainingArguments, PaliGemmaProcessor, PaliGemmaForConditionalGeneration
+from transformers.trainer_callback import TrainerCallback
 from peft import get_peft_model, LoraConfig
 from transformers import BitsAndBytesConfig
 
@@ -64,22 +65,28 @@ def load_and_prepare_dataset(subset_ratio=1.0):
     return train_ds, valid_ds, test_ds
 
 def collate_fn(batch):
-    # Batch contains dictionaries with "image", "prompt", and "target" keys
-    images = [item["image"] for item in batch]
-    prefixes = [f"<image>{item['prompt']}" for item in batch]  
-    suffixes = [item["target"] for item in batch]  
-
-    # Process the inputs using the processor
-    inputs = processor(
-        text=prefixes,
-        images=images,
-        return_tensors="pt",
-        suffix=suffixes,
-        padding="longest"
-    )
-    
-    # Do not move the data to GPU here.
-    return inputs
+    try:
+        # Batch contains dictionaries with "image", "prompt", and "target" keys
+        images = [item["image"] for item in batch]
+        prefixes = [f"<image>{item['prompt']}" for item in batch]  
+        suffixes = [item["target"] for item in batch]
+        
+        # Process the inputs using the processor
+        inputs = processor(
+            text=prefixes,
+            images=images,
+            return_tensors="pt",
+            suffix=suffixes,
+            padding="longest"
+        )
+        
+        # Do not move the data to GPU here.
+        return inputs
+    except Exception as e:
+        print(f"Error in collate_fn: {e}")
+        print(f"Batch size: {len(batch)}")
+        # In case of error, return an empty batch rather than crashing
+        return {"input_ids": torch.tensor([]), "attention_mask": torch.tensor([]), "labels": torch.tensor([])}
 
 def compute_metrics(eval_preds):
     """
@@ -145,6 +152,41 @@ def run_inference(model, processor, test_samples):
             torch.cuda.empty_cache()
     
     return results
+
+# Custom callback for memory management
+class MemoryManagementCallback(TrainerCallback):
+    """Custom callback for managing memory during training."""
+    
+    def on_evaluate(self, args, state, control, **kwargs):
+        """Called before evaluation starts."""
+        # Clear memory before evaluation
+        torch.cuda.empty_cache()
+        gc.collect()
+    
+    def on_evaluate_end(self, args, state, control, **kwargs):
+        """Called after evaluation ends."""
+        # Make sure to clear gradients and memory after evaluation
+        model = kwargs.get("model", None)
+        if model is not None:
+            model.zero_grad(set_to_none=True)  # More efficient than just .zero_grad()
+        
+        # Clear CUDA cache and collect garbage
+        torch.cuda.empty_cache()
+        gc.collect()
+    
+    def on_step_begin(self, args, state, control, **kwargs):
+        """Called at the beginning of each step (before gradient computation)."""
+        model = kwargs.get("model", None)
+        # Ensure we're starting with clean gradients
+        if model is not None and state.global_step > 0:
+            model.zero_grad(set_to_none=True)
+    
+    def on_step_end(self, args, state, control, **kwargs):
+        """Called at the end of each step (after gradient update)."""
+        # Periodically clear cache on step end (not every step to avoid performance impact)
+        if state.global_step % 50 == 0:
+            torch.cuda.empty_cache()
+            gc.collect()
 
 def main():
     global processor
@@ -239,7 +281,7 @@ def main():
     )
     
     # -------------------------------------------------------
-    # Initialize the Trainer.
+    # Initialize the Trainer with our memory management callback.
     # -------------------------------------------------------
     trainer = Trainer(
         model=model,
@@ -247,7 +289,8 @@ def main():
         train_dataset=train_ds,
         eval_dataset=valid_ds,
         data_collator=collate_fn,
-        compute_metrics=compute_metrics
+        compute_metrics=compute_metrics,
+        callbacks=[MemoryManagementCallback()]  # Add our custom memory management callback
     )
     
     # -------------------------------------------------------
@@ -267,24 +310,47 @@ def main():
     # -------------------------------------------------------
     try:
         print("Final evaluation on validation set:")
-        # Clear memory before evaluation
+        # Ensure clean start for evaluation
+        model.zero_grad(set_to_none=True)
         gc.collect()
         torch.cuda.empty_cache()
         
+        # Add timeout to evaluation to prevent indefinite hangs
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            eval_results = trainer.evaluate(eval_dataset=valid_ds, max_length=20, num_beams=1)
+            print("Starting validation evaluation...")
+            eval_results = trainer.evaluate(
+                eval_dataset=valid_ds, 
+                max_length=20, 
+                num_beams=1
+            )
+            print("Completed validation evaluation")
         print("Validation Results:", eval_results)
         
-        # Clear memory between evaluations
+        # Clear gradients and memory between evaluations
+        model.zero_grad(set_to_none=True)
         gc.collect()
         torch.cuda.empty_cache()
         
         print("Final evaluation on test set:")
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            test_results = trainer.evaluate(eval_dataset=test_ds, max_length=20, num_beams=1)
+            print("Starting test evaluation...")
+            test_results = trainer.evaluate(
+                eval_dataset=test_ds, 
+                max_length=20, 
+                num_beams=1
+            )
+            print("Completed test evaluation")
         print("Test Results:", test_results)
+        
+        # Final cleanup after all evaluations
+        model.zero_grad(set_to_none=True)
+        gc.collect()
+        torch.cuda.empty_cache()
+        
     except Exception as e:
         print(f"Error during evaluation: {e}")
+        import traceback
+        traceback.print_exc()
     
     # -------------------------------------------------------
     # Run direct inference on a few samples to verify model outputs
