@@ -19,24 +19,13 @@ logger = logging.getLogger(__name__)
 
 def collate_fn(examples: List[Dict[str, Any]], processor: PaliGemmaProcessor, dtype: torch.dtype) -> Dict[str, torch.Tensor]:
     """
-    Collate function for the dataloader that processes examples into model inputs.
-    
-    Args:
-        examples: List of examples containing images and labels
-        processor: PaliGemma processor for tokenization
-        dtype: Torch dtype for tensor conversion
-    
-    Returns:
-        Processed tokens ready for model input
+    Collate function that now assumes images have been preprocessed to RGB,
+    reducing redundant work during training.
     """
     texts = ["<image>ocr\n" for _ in examples]
     labels = [example["label"] for example in examples]
-    images = []
-    for example in examples:
-        img = example["image"]
-        if isinstance(img, str):
-            img = Image.open(img)
-        images.append(img.convert("RGB"))
+    # Directly use the preprocessed image
+    images = [example["image"] for example in examples]
     
     tokens = processor(
         text=texts,
