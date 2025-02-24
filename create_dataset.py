@@ -1,9 +1,10 @@
 import os
 from datasets import Dataset, Features, Value, Image
 import datetime
+from huggingface_hub import Repository
 
 # Folders with images
-FOLDERS = ['generated', 'augmented']
+FOLDERS = ['created', 'augmented']
 
 # Replace with your actual repository name.
 repo_name = "spawn99/UK-Car-Plate-VRN-Dataset"
@@ -11,7 +12,7 @@ repo_name = "spawn99/UK-Car-Plate-VRN-Dataset"
 # Create a dictionary to accumulate records keyed by VRN.
 data = {}
 
-# Process images from both "generated" and "augmented" folders.
+# Process images from both "created" and "augmented" folders.
 for folder in FOLDERS:
     if not os.path.exists(folder):
         continue
@@ -38,8 +39,8 @@ for folder in FOLDERS:
                     "augmented_rear_plate": None    # single augmented rear image
                 }
             
-            # Handle generated images
-            if folder == "generated":
+            # Handle created images
+            if folder == "created":
                 if plate_side_code == 'f':
                     data[vrn]["front_plate"] = image_path
                 elif plate_side_code == 'r':
@@ -143,7 +144,15 @@ Repository: https://huggingface.co/datasets/{}
 with open("README.md", "w") as f:
     f.write(readme_content)
 
-# Push the dataset to the Hugging Face Hub.
+# Push the dataset and README to the Hugging Face Hub
+
+# Initialize repository
+repo = Repository(local_dir=".", clone_from=repo_name, use_auth_token=True)
+
+# Push the dataset
 ds.push_to_hub(repo_name, private=False)
 
-print(f"Dataset pushed to: https://huggingface.co/datasets/{repo_name}") 
+# Add and push README
+repo.push_to_hub(commit_message="Update README.md")
+
+print(f"Dataset and README pushed to: https://huggingface.co/datasets/{repo_name}") 
