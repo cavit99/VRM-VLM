@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import uuid
 from datasets import load_dataset, Dataset
 from transformers import Trainer, TrainingArguments, PaliGemmaProcessor, PaliGemmaForConditionalGeneration
 from peft import get_peft_model, LoraConfig
@@ -165,8 +166,10 @@ def main():
         learning_rate=5e-5,
         optim="adamw_torch",
         weight_decay=1e-6,
+        gradient_checkpointing=True,
         adam_beta2=0.999,
         warmup_steps=5,
+        run_name=f"paligemma-vrn-{str(uuid.uuid4())[:8]}",
         save_total_limit=1,
         remove_unused_columns=False,
         bf16=True,
