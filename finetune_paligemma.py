@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 import torch
 from datasets import load_dataset, Dataset
 from peft import get_peft_model, LoraConfig
-from PIL import Image
+
 from transformers import (
     PaliGemmaProcessor,
     PaliGemmaForConditionalGeneration,
@@ -121,7 +121,12 @@ def main():
 
     bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16)
 
-    model = PaliGemmaForConditionalGeneration.from_pretrained(CONFIG["model_id"], device_map="auto", quantization_config=bnb_config)
+    model = PaliGemmaForConditionalGeneration.from_pretrained(
+        CONFIG["model_id"], 
+        device_map="auto", 
+        quantization_config=bnb_config,
+        attn_implementation="eager"
+    )
     
 
     # Setup LoRA
@@ -183,8 +188,8 @@ num_train_epochs=CONFIG["num_epochs"],
     load_best_model_at_end=True,
     metric_for_best_model="sequence_accuracy",
     greater_is_better=True,
-    per_device_train_batch_size=4,  
-    per_device_eval_batch_size=4,   
+    per_device_train_batch_size=CONFIG["batch_size"],  
+    per_device_eval_batch_size=CONFIG["batch_size"],   
     eval_accumulation_steps=4
     )
 
