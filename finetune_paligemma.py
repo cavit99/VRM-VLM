@@ -276,9 +276,8 @@ def main():
         bf16=True,  
         label_names=["labels"],
         dataloader_pin_memory=False,
-        dataloader_num_workers=12,
-        eval_accumulation_steps=2,    
-    )
+        dataloader_num_workers=12
+        )
     
     # -------------------------------------------------------
     # Initialize the Trainer with our memory management callback.
