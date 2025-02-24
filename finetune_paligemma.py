@@ -121,7 +121,8 @@ def main():
         device_map="auto",
         quantization_config=bnb_config,
         torch_dtype=torch.bfloat16,
-        attn_implementation="eager"
+        attn_implementation="eager",
+        use_cache=False
     )
     
     # -------------------------------------------------------
@@ -189,8 +190,7 @@ def main():
         train_dataset=train_ds,
         eval_dataset=valid_ds,
         data_collator=collate_fn,
-        compute_metrics=compute_metrics,
-        use_cache=False
+        compute_metrics=compute_metrics
     )
     
     # -------------------------------------------------------
