@@ -101,11 +101,21 @@ def main():
     # "augmented_front_plate" and "augmented_rear_plate", and the registration number in "vrn".
     ds = load_dataset("spawn99/UK-Car-Plate-VRN-Dataset", split="train")
 
-    # 2. Cast the image columns to Image type.  This decodes them into PIL Images.
-    ds = ds.cast_column("front_plate", Image)
-    ds = ds.cast_column("rear_plate", Image)
-    ds = ds.cast_column("augmented_front_plate", Image)
-    ds = ds.cast_column("augmented_rear_plate", Image)
+    # 2. Cast the image columns to Image type. This decodes them into PIL Images.
+    # Instead of directly using the Image class, use a function to create images
+    def create_pil_image(img_data):
+        if isinstance(img_data, str):
+            return Image.open(img_data)
+        return img_data
+
+    ds = ds.map(
+        lambda x: {
+            "front_plate": create_pil_image(x["front_plate"]),
+            "rear_plate": create_pil_image(x["rear_plate"]),
+            "augmented_front_plate": create_pil_image(x["augmented_front_plate"]),
+            "augmented_rear_plate": create_pil_image(x["augmented_rear_plate"])
+        }
+    )
 
     # 3. Convert each row into two examples (one per augmented image).
     def split_augmented(example):
