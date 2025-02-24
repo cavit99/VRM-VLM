@@ -77,13 +77,7 @@ def collate_fn(batch):
         padding="longest"
     )
     
-    # Ensure that 'labels' field exists for loss computation
-    if "labels" not in inputs and "input_ids" in inputs:
-        inputs["labels"] = inputs["input_ids"].clone()
-    
-    # Move inputs to device here (this is optional as Trainer will do it)
-    # inputs = {k: v.to(DEVICE) for k, v in inputs.items() if isinstance(v, torch.Tensor)}
-    
+    # Do not move the data to GPU here.
     return inputs
 
 def compute_metrics(eval_preds):
@@ -137,22 +131,9 @@ def main():
     lora_config = LoraConfig(
         r=8,
         target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-        task_type="CAUSAL_LM",
-        lora_alpha=16,
-        lora_dropout=0.05,
-        bias="none",
+        task_type="CAUSAL_LM"
     )
-    
-    # Print model parameters before LoRA to verify what's trainable initially
-    original_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model trainable parameters before LoRA: {original_trainable}")
-    
-    # Set use_cache=False explicitly before creating PEFT model
-    model.config.use_cache = False
-    
-    # Create the PEFT model
     model = get_peft_model(model, lora_config)
-    print(f"PEFT model created with config: {lora_config}")
     
     # -------------------------------------------------------
     # Freeze the vision encoder layers to reduce the number of trainable parameters.
@@ -163,22 +144,6 @@ def main():
     if hasattr(model, "multi_modal_projector"):
         for param in model.multi_modal_projector.parameters():
             param.requires_grad = False
-    
-    # Ensure LoRA parameters are trainable
-    for name, param in model.named_parameters():
-        if 'lora' in name:
-            param.requires_grad = True
-    
-    # Set model to train mode
-    model.train()
-    
-    # Check trainable parameters
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model has {trainable_params} trainable parameters")
-    
-    # If trainable_params is 0, raise an error
-    if trainable_params == 0:
-        raise ValueError("No trainable parameters found. Cannot train the model.")
     
     model.to(DEVICE)
     
@@ -194,17 +159,16 @@ def main():
         output_dir=OUTPUT_DIR,
         num_train_epochs=3,
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=8,
+        gradient_accumulation_steps=12,
         eval_strategy="steps",
         save_strategy="steps",
         eval_steps=20,
         save_steps=20,
         logging_steps=100,
         learning_rate=5e-5,
-        optim="adamw_torch",
+        optim="adamw_bnb_8bit",
         weight_decay=1e-6,
         max_grad_norm=1.0,
-        gradient_checkpointing=True,
         adam_beta2=0.999,
         warmup_steps=5,
         run_name=f"paligemma-vrn-{str(uuid.uuid4())[:8]}",
@@ -219,7 +183,6 @@ def main():
     # -------------------------------------------------------
     # Initialize the Trainer.
     # -------------------------------------------------------
-    
     trainer = Trainer(
         model=model,
         args=training_args,
