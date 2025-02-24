@@ -13,23 +13,14 @@ import os
 class CustomTrainer(Trainer):
     def create_optimizer(self):
         self.optimizer = torch.optim.AdamW([
-            {"params": self.model.vision_tower.parameters(), "lr": 2.5e-6},
-            {"params": self.model.multi_modal_projector.parameters(), "lr": 1e-5},
-            {"params": self.model.language_model.parameters(), "lr": 2.5e-5},
+            {"params": self.model.vision_tower.parameters(), "lr": 1.25e-6},  
+            {"params": self.model.multi_modal_projector.parameters(), "lr": 5e-6}, 
+            {"params": self.model.language_model.parameters(), "lr": 1.25e-5},  
         ])
 
 def main():
     # Reduce batch size to help with memory issues
-    BATCH_SIZE = 16  # Reduced from 32
-
-    # Adjust learning rates slightly to compensate for smaller batch size
-    class CustomTrainer(Trainer):
-        def create_optimizer(self):
-            self.optimizer = torch.optim.AdamW([
-                {"params": self.model.vision_tower.parameters(), "lr": 2.5e-6},  # Halved from 5e-6
-                {"params": self.model.multi_modal_projector.parameters(), "lr": 1e-5},  # Halved from 2e-5
-                {"params": self.model.language_model.parameters(), "lr": 2.5e-5},  # Halved from 5e-5
-            ])
+    BATCH_SIZE = 8  # Reduced from 16
 
     # Add memory management configuration
     torch.cuda.set_per_process_memory_fraction(0.95)  # Leave some GPU memory free
@@ -96,7 +87,8 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = PaliGemmaForConditionalGeneration.from_pretrained(
         model_id,
-        torch_dtype=torch.bfloat16  # or use 'torch.float16' if bf16 isn't available.
+        torch_dtype=torch.bfloat16,  # or use 'torch.float16' if bf16 isn't available.
+        attn_implementation='eager'  # Added this parameter
     ).to(device)
     
     model.train()  # Unfreeze entire model.
@@ -125,14 +117,19 @@ def main():
     # 6. Setup the training arguments.
 
     # Compute total training steps.
-    # Since there are 312 batches per epoch and we're training for 20 epochs:
+    # With 312 batches per epoch and 20 epochs:
     num_train_steps = 312 * 20  # = 6240 steps
+    
+    # Calculate scheduler steps:
+    # Using approximately 10% for decay and 85% for stable phase
+    num_decay_steps = int(num_train_steps * 0.10)    # ~624 steps
+    num_stable_steps = int(num_train_steps * 0.85)   # ~5304 steps
 
     training_args = TrainingArguments(
         num_train_epochs=20,
         remove_unused_columns=False,
         per_device_train_batch_size=BATCH_SIZE,
-        gradient_accumulation_steps=2,  # Added to maintain effective batch size
+        gradient_accumulation_steps=4,  # Increased from 2 to maintain effective batch size
         warmup_steps=300,
         weight_decay=1e-6,
         adam_beta2=0.999,
@@ -152,10 +149,10 @@ def main():
         lr_scheduler_type="warmup_stable_decay",
         # Pass additional scheduler arguments so that the scheduler has all required inputs.
         lr_scheduler_kwargs={
-            "num_decay_steps": 624,
-            "num_stable_steps": 5316,
+            "num_decay_steps": num_decay_steps,
+            "num_stable_steps": num_stable_steps,
             "min_lr_ratio": 0.1
-       }
+        }
     )
 
     # 7. Initialize the custom Trainer with training and evaluation datasets.
