@@ -9,10 +9,15 @@ from transformers import (
     PaliGemmaForConditionalGeneration,
     TrainingArguments,
     Trainer,
+    logging
 )
 from PIL import Image
 import uuid
 import datetime
+
+# Set a global verbosity level (INFO, DEBUG, etc.)
+logging.set_verbosity_info()
+logger = logging.get_logger(__name__)
 
 # Removed the custom trainer with layer-specific learning rates.
 # We now rely on the default optimizer creation (AdamW) from Trainer.
@@ -59,9 +64,9 @@ def main():
                 timeout=datetime.timedelta(minutes=15)
             )
             torch.cuda.set_device(local_rank)
-            print(f"Initialized process group for rank {local_rank} of {world_size}")
+            logger.info(f"Initialized process group for rank {local_rank} of {world_size}")
         except Exception as e:
-            print(f"Failed to initialize distributed training: {str(e)}")
+            logger.error(f"Failed to initialize distributed training: {str(e)}")
             raise
 
     # Move BATCH_SIZE definition to top of main()
@@ -75,8 +80,8 @@ def main():
     
     # Only print on main process
     if local_rank <= 0:
-        print(f"Running with {world_size} GPUs")
-        print(f"Global batch size: {global_batch_size}")
+        logger.info(f"Running with {world_size} GPUs")
+        logger.info(f"Global batch size: {global_batch_size}")
     
     # Memory and CUDA optimizations
     if device == "cuda":
@@ -118,7 +123,7 @@ def main():
 
     # After flattening, we have approximately 15,000 examples
     total_available = len(ds_aug)
-    print(f"Total available examples: {total_available}")
+    logger.info(f"Total available examples: {total_available}")
     
     # Calculate the largest number divisible by both BATCH_SIZE and our split ratio (70/15/15)
     batches_per_epoch = (total_available // BATCH_SIZE // num_epochs) * num_epochs  # Round down to nearest multiple of epochs
@@ -138,20 +143,20 @@ def main():
     # Use standard cosine scheduler instead of the custom scheduler.
     warmup_steps = total_training_steps // num_epochs  # Approx. 5% of total steps for warmup
 
-    print("\nTraining Configuration:")
-    print(f"Total batches per epoch: {batches_per_epoch}")
-    print(f"Batch size: {BATCH_SIZE}")
-    print(f"Gradient accumulation steps: {gradient_accumulation_steps}")
-    print(f"Effective batch size: {effective_batch_size}")
-    print(f"Steps per epoch: {steps_per_epoch}")
-    print(f"Total training steps: {total_training_steps}")
-    print(f"Warmup steps: {warmup_steps}")
+    logger.info("\nTraining Configuration:")
+    logger.info(f"Total batches per epoch: {batches_per_epoch}")
+    logger.info(f"Batch size: {BATCH_SIZE}")
+    logger.info(f"Gradient accumulation steps: {gradient_accumulation_steps}")
+    logger.info(f"Effective batch size: {effective_batch_size}")
+    logger.info(f"Steps per epoch: {steps_per_epoch}")
+    logger.info(f"Total training steps: {total_training_steps}")
+    logger.info(f"Warmup steps: {warmup_steps}")
 
     ds_aug = ds_aug.shuffle(seed=42)
     ds_aug = ds_aug.select(range(total_examples))
     
     # Log the total number of examples selected.
-    print(f"Total examples selected: {total_examples}")
+    logger.info(f"Total examples selected: {total_examples}")
 
     # Split the dataset.
     train_ds = ds_aug.select(range(0, train_count))
@@ -163,17 +168,17 @@ def main():
     assert len(val_ds) == val_count, f"Expected {val_count} validation examples, got {len(val_ds)}"
     assert len(test_ds) == test_count, f"Expected {test_count} test examples, got {len(test_ds)}"
     
-    print(f"Train dataset size: {len(train_ds)}")
-    print(f"Validation dataset size: {len(val_ds)}")
-    print(f"Test dataset size: {len(test_ds)}")
+    logger.info(f"Train dataset size: {len(train_ds)}")
+    logger.info(f"Validation dataset size: {len(val_ds)}")
+    logger.info(f"Test dataset size: {len(test_ds)}")
     
     # Pre-process images before training
-    print("Pre-processing training images...")
+    logger.info("Pre-processing training images...")
     train_ds = train_ds.map(
         lambda x: {"image": x["image"].convert("RGB") if isinstance(x["image"], str) else x["image"]}, 
         load_from_cache_file=False
     )
-    print("Pre-processing validation images...")
+    logger.info("Pre-processing validation images...")
     val_ds = val_ds.map(
         lambda x: {"image": x["image"].convert("RGB") if isinstance(x["image"], str) else x["image"]}, 
         load_from_cache_file=False
@@ -203,7 +208,7 @@ def main():
     ).to(device)
 
     # Warmup pass to initialize CUDA
-    print("Performing CUDA warmup pass...")
+    logger.info("Performing CUDA warmup pass...")
     with torch.no_grad():
         dummy_output = model.generate(**dummy_input, max_new_tokens=20)
         torch.cuda.synchronize()  # Add explicit sync
@@ -262,7 +267,7 @@ def main():
 
     # 9. Evaluate on the test dataset.
     results = trainer.predict(test_ds)
-    print("Test results:", results.metrics)
+    logger.info(f"Test results: {results.metrics}")
 
     # 10. Optionally, push your model to the Hugging Face Hub.
     trainer.push_to_hub()
@@ -273,7 +278,7 @@ if __name__ == '__main__':
         torch.multiprocessing.set_sharing_strategy('file_system')
         main()
     except Exception as e:
-        print(f"Error in main: {str(e)}")
+        logger.error(f"Error in main: {str(e)}")
         # Make sure to clean up distributed process group
         if torch.distributed.is_initialized():
             torch.distributed.destroy_process_group()
