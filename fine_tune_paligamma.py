@@ -1,4 +1,6 @@
 import torch
+torch.set_float32_matmul_precision('high')  # Enable TF32 tensor cores for float32 matrix multiplication
+
 from datasets import load_dataset, Dataset
 import os
 # Set OpenMP threads before other imports
@@ -87,7 +89,6 @@ def main():
     if device == "cuda":
         torch.backends.cudnn.benchmark = True
         torch.cuda.empty_cache()
-        torch.set_float32_matmul_precision('high')  # Enable TF32 for better performance
 
     # Adjust batch size for multi-GPU setup
     num_epochs = 20
@@ -250,7 +251,6 @@ def main():
         gradient_checkpointing=True,
         # Multi-GPU specific arguments:
         local_rank=-1,
-        parallel_mode="distributed",
     )
 
     # 7. Initialize the Trainer with training and evaluation datasets.
