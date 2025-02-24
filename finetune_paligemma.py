@@ -151,9 +151,13 @@ def main():
     model.to(DEVICE)
     
     # -------------------------------------------------------
-    # Prepare the dataset with just 10% of the available samples for testing
+    # Prepare the dataset with an even smaller subset for evaluation
     # -------------------------------------------------------
     train_ds, valid_ds, test_ds = load_and_prepare_dataset(subset_ratio=0.1)
+    
+    # Use a very small validation dataset to prevent OOM
+    valid_ds = valid_ds.select(range(min(50, len(valid_ds))))
+    test_ds = test_ds.select(range(min(50, len(test_ds))))
     
     # -------------------------------------------------------
     # Define training hyperparameters.
@@ -178,10 +182,13 @@ def main():
         run_name=f"paligemma-vrn-{str(uuid.uuid4())[:8]}",
         save_total_limit=1,
         remove_unused_columns=False,
-        bf16=True,
+        bf16=True,  # Changed from bf16=True to ensure consistent precision
         label_names=["labels"],
         dataloader_pin_memory=False,
-        dataloader_num_workers=2
+        dataloader_num_workers=2,
+        predict_with_generate=False,  # Disable generation during evaluation to save memory
+        generation_max_length=20,     # Set a reasonable max length for generation if needed
+        eval_accumulation_steps=1,    # Process evaluation predictions in smaller chunks
     )
     
     # -------------------------------------------------------
@@ -201,12 +208,17 @@ def main():
     # -------------------------------------------------------
     trainer.train()
     
-    # Evaluate on the validation set.
-    eval_results = trainer.evaluate()
+    # -------------------------------------------------------
+    # For final evaluation, do it in smaller batches with controlled memory usage
+    # -------------------------------------------------------
+    print("Final evaluation on validation set:")
+    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+        eval_results = trainer.evaluate(max_length=20, num_beams=1)
     print("Validation Results:", eval_results)
     
-    # Optionally, evaluate on the test set.
-    test_results = trainer.evaluate(test_ds)
+    print("Final evaluation on test set:")
+    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+        test_results = trainer.evaluate(test_ds, max_length=20, num_beams=1)
     print("Test Results:", test_results)
     
     # -------------------------------------------------------
