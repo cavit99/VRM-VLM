@@ -7,19 +7,33 @@ from transformers import (
     Trainer,
 )
 from PIL import Image
+import os
 
 # Define a custom Trainer that applies layer-specific learning rates.
 class CustomTrainer(Trainer):
     def create_optimizer(self):
         self.optimizer = torch.optim.AdamW([
-            {"params": self.model.vision_tower.parameters(), "lr": 5e-6},
-            {"params": self.model.multi_modal_projector.parameters(), "lr": 2e-5},
-            {"params": self.model.language_model.parameters(), "lr": 5e-5},
+            {"params": self.model.vision_tower.parameters(), "lr": 2.5e-6},
+            {"params": self.model.multi_modal_projector.parameters(), "lr": 1e-5},
+            {"params": self.model.language_model.parameters(), "lr": 2.5e-5},
         ])
 
 def main():
-    # Define batch size parameter for easy adjustment.
-    BATCH_SIZE = 32
+    # Reduce batch size to help with memory issues
+    BATCH_SIZE = 16  # Reduced from 32
+
+    # Adjust learning rates slightly to compensate for smaller batch size
+    class CustomTrainer(Trainer):
+        def create_optimizer(self):
+            self.optimizer = torch.optim.AdamW([
+                {"params": self.model.vision_tower.parameters(), "lr": 2.5e-6},  # Halved from 5e-6
+                {"params": self.model.multi_modal_projector.parameters(), "lr": 1e-5},  # Halved from 2e-5
+                {"params": self.model.language_model.parameters(), "lr": 2.5e-5},  # Halved from 5e-5
+            ])
+
+    # Add memory management configuration
+    torch.cuda.set_per_process_memory_fraction(0.95)  # Leave some GPU memory free
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
 
     # 1. Load the dataset from the Hub.
     # The dataset was previously created with create_dataset.py.
@@ -115,10 +129,11 @@ def main():
     num_train_steps = 312 * 20  # = 6240 steps
 
     training_args = TrainingArguments(
-        num_train_epochs=20,          
+        num_train_epochs=20,
         remove_unused_columns=False,
-        per_device_train_batch_size=BATCH_SIZE, 
-        warmup_steps=300,  # Mandatory warmup steps!
+        per_device_train_batch_size=BATCH_SIZE,
+        gradient_accumulation_steps=2,  # Added to maintain effective batch size
+        warmup_steps=300,
         weight_decay=1e-6,
         adam_beta2=0.999,
         logging_steps=100,
