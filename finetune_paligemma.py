@@ -133,7 +133,6 @@ def main():
         )
         model = PaliGemmaForConditionalGeneration.from_pretrained(
             CONFIG["model_id"],
-            device_map="auto",
             attn_implementation="eager",
             quantization_config=bnb_config,
             torch_dtype=torch.bfloat16,
@@ -141,7 +140,6 @@ def main():
     else:
         model = PaliGemmaForConditionalGeneration.from_pretrained(
             CONFIG["model_id"],
-            device_map="auto",
             attn_implementation="eager"
         )
     
