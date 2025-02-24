@@ -31,8 +31,6 @@ def main():
     # It has 7500 rows with augmented images in the columns:
     # "augmented_front_plate" and "augmented_rear_plate", and the registration number in "vrn".
     ds = load_dataset("spawn99/UK-Car-Plate-VRN-Dataset", split="train")
-    print(type(ds))
-    print(dir(ds))  # List all available methods and properties
     
     # 2. Convert each row into two examples (one per augmented image).
     def split_augmented(example):
