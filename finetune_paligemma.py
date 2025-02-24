@@ -63,25 +63,25 @@ def load_and_prepare_dataset(subset_ratio=1.0):
 
 def collate_fn(batch):
     """
-    Custom collate function to prepare a batch of examples.
+    Custom collate function to prepare a batch of examples for PaliGemma2.
     
     For each example we:
-      - Prepend the required <image> token to the prompt (resulting in "<image> ocr")
-      - Encode the text and image inputs using the processor.
-      - Tokenize the target (VRN) text into labels.
+      - Use the image as the visual input
+      - Use the prompt as the text prefix (e.g., "ocr")
+      - Use the target (VRN) as the suffix (expected output)
     """
     images = [sample["image"] for sample in batch]
-    # Prepend the "<image>" token as required by PaLiGemma's formatting.
     prompts = ["<image> " + sample["prompt"] for sample in batch]  # results in "<image> ocr"
     targets = [sample["target"] for sample in batch]
     
-    # Process inputs (the processor handles image and text encoding)
-    inputs = processor(text=prompts, images=images, return_tensors="pt", padding="longest", truncation=True)
-    
-    # Tokenize the target texts for labels
-    with processor.as_target_processor():
-        labels = processor.tokenizer(targets, return_tensors="pt", padding="longest", truncation=True).input_ids
-    inputs["labels"] = labels.to(DEVICE)
+    # Process inputs with suffix parameter to generate labels automatically
+    inputs = processor(
+        text=prompts, 
+        images=images, 
+        suffix=targets,  
+        return_tensors="pt", 
+        padding="longest"
+    )
     
     # Move the entire input batch to the target device
     inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
