@@ -214,9 +214,9 @@ def main():
     training_args = TrainingArguments(
         output_dir=OUTPUT_DIR,
         num_train_epochs=3,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
-        gradient_accumulation_steps=2,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
+        gradient_accumulation_steps=1,
         eval_strategy="steps",
         save_strategy="steps",
         eval_steps=20,
@@ -233,9 +233,7 @@ def main():
         remove_unused_columns=False,
         bf16=True,  
         label_names=["labels"],
-        dataloader_pin_memory=False,
-        dataloader_num_workers=2,
-        eval_accumulation_steps=2,    
+        dataloader_pin_memory=False   
     )
     
     # -------------------------------------------------------
