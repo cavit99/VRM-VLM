@@ -14,14 +14,8 @@ from PIL import Image
 import uuid
 import datetime
 
-# Define a custom Trainer that applies layer-specific learning rates.
-class CustomTrainer(Trainer):
-    def create_optimizer(self):
-        self.optimizer = torch.optim.AdamW([
-            {"params": self.model.vision_tower.parameters(), "lr": 2.5e-6},
-            {"params": self.model.multi_modal_projector.parameters(), "lr": 1e-5},
-            {"params": self.model.language_model.parameters(), "lr": 2.5e-5},
-        ])
+# Removed the custom trainer with layer-specific learning rates.
+# We now rely on the default optimizer creation (AdamW) from Trainer.
 
 # Move both collate functions outside of main() to make them pickleable
 def collate_fn(examples, processor, device, dtype):
@@ -141,7 +135,9 @@ def main():
     steps_per_epoch = train_count // effective_batch_size
     total_training_steps = steps_per_epoch * num_epochs
     
-    # Log all calculations for verification
+    # Use standard cosine scheduler instead of the custom scheduler.
+    warmup_steps = total_training_steps // num_epochs  # Approx. 5% of total steps for warmup
+
     print("\nTraining Configuration:")
     print(f"Total batches per epoch: {batches_per_epoch}")
     print(f"Batch size: {BATCH_SIZE}")
@@ -149,6 +145,7 @@ def main():
     print(f"Effective batch size: {effective_batch_size}")
     print(f"Steps per epoch: {steps_per_epoch}")
     print(f"Total training steps: {total_training_steps}")
+    print(f"Warmup steps: {warmup_steps}")
 
     ds_aug = ds_aug.shuffle(seed=42)
     ds_aug = ds_aug.select(range(total_examples))
@@ -216,32 +213,14 @@ def main():
     model.train()  # Unfreeze entire model.
     DTYPE = model.dtype
 
-    # 6. Setup the training arguments.
-    # Compute steps based on dataset size, batch size, and gradient accumulation
-    effective_batch_size = BATCH_SIZE * gradient_accumulation_steps
-    steps_per_epoch = len(train_ds) // effective_batch_size
-    total_training_steps = steps_per_epoch * num_epochs
-    
-    # Calculate scheduler steps
-    warmup_steps = total_training_steps // num_epochs  # 5% of total steps for warmup
-    decay_steps = total_training_steps // 10   # 10% of total steps for decay
-    stable_steps = total_training_steps - warmup_steps - decay_steps  # Remaining steps
-    
-    print(f"Training steps calculation:")
-    print(f"Effective batch size: {effective_batch_size}")
-    print(f"Steps per epoch: {steps_per_epoch}")
-    print(f"Total training steps: {total_training_steps}")
-    print(f"Warmup steps: {warmup_steps}")
-    print(f"Decay steps: {decay_steps}")
-    print(f"Stable steps: {stable_steps}")
-    # Generate a short UUID (first 8 characters)
+    # 6. Setup the training arguments using a cosine scheduler.
     run_id = str(uuid.uuid4())[:8]
 
     training_args = TrainingArguments(
         num_train_epochs=num_epochs,
         remove_unused_columns=False,
-        per_device_train_batch_size=BATCH_SIZE,  # This is now per GPU
-        per_device_eval_batch_size=BATCH_SIZE,   # Add explicit eval batch size
+        per_device_train_batch_size=BATCH_SIZE,
+        per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,  
         weight_decay=1e-6,
@@ -259,23 +238,18 @@ def main():
         eval_strategy="steps",
         eval_steps=500,
         dataloader_pin_memory=True,
-        lr_scheduler_type="warmup_stable_decay",
-        lr_scheduler_kwargs={
-            "num_decay_steps": decay_steps,
-            "num_stable_steps": stable_steps,
-            "min_lr_ratio": 0.1
-        },
+        lr_scheduler_type="cosine",  # Use standard cosine scheduler.
         dataloader_num_workers=num_workers,
         ddp_find_unused_parameters=False,
         dataloader_drop_last=True,
         gradient_checkpointing=True,
-        # Add multi-GPU specific arguments
-        local_rank=-1,                  # Required for distributed training
-        parallel_mode="distributed",    # Enable distributed mode
+        # Multi-GPU specific arguments:
+        local_rank=-1,
+        parallel_mode="distributed",
     )
 
-    # 7. Initialize the custom Trainer with training and evaluation datasets.
-    trainer = CustomTrainer(
+    # 7. Initialize the Trainer with training and evaluation datasets.
+    trainer = Trainer(
         model=model,
         train_dataset=train_ds,
         eval_dataset=val_ds,
