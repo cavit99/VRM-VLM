@@ -19,7 +19,7 @@ class CustomTrainer(Trainer):
             {"params": self.model.multi_modal_projector.parameters(), "lr": 2e-5},
             # LLM head: higher LR for refining text generation.
             {"params": self.model.language_model.parameters(), "lr": 5e-5},
-        ])  # Remove max_grad_norm from here
+        ]) 
         return optimizer
 
 def main():
@@ -114,6 +114,11 @@ def main():
         return tokens
 
     # 6. Setup the training arguments.
+
+    # Compute total training steps.
+    # Since there are 312 batches per epoch and we're training for 20 epochs:
+    num_train_steps = 312 * 20  # = 6240 steps
+
     training_args = TrainingArguments(
         num_train_epochs=20,          
         remove_unused_columns=False,
@@ -130,11 +135,16 @@ def main():
         label_smoothing_factor=0.1,    
         bf16=True,
         report_to=["wandb"],
-        run_name="paligemma-vrn-finetune",  # Descriptive run name.
-        evaluation_strategy="steps",        # Evaluation strategy.
-        eval_steps=500,                     # Evaluation frequency.
+        run_name="paligemma-vrn-finetune",
+        evaluation_strategy="steps",
+        eval_steps=500,
         dataloader_pin_memory=False,
-        lr_scheduler_type="warmup_stable_decay", 
+        lr_scheduler_type="warmup_stable_decay",
+        # Pass additional scheduler arguments so that the scheduler has all required inputs.
+        lr_scheduler_kwargs={
+            "num_training_steps": num_train_steps,
+            "num_decay_steps": num_train_steps - 300  # decay steps after warmup.
+        }
     )
 
     # 7. Initialize the custom Trainer with training and evaluation datasets.
