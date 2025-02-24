@@ -120,7 +120,7 @@ def main():
     test_size = total_examples - train_size - val_size
 
     # Split the dataset with shuffling
-    ds_aug = ds_aug.shuffle(seed=42)  # Add random shuffling with a fixed seed
+    ds_aug = ds_aug.shuffle(seed=42) 
     
     # Split the dataset directly
     train_ds = ds_aug.select(range(0, train_size))
