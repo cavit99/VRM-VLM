@@ -29,16 +29,12 @@ Ensure you are using Python 3 and it is recommended to use a virtual environment
 pip install -r requirements.txt
 ```
 
-**Dependencies:**
-
-- [Pillow](https://python-pillow.org/) – For image processing and rendering.
-- [datasets](https://github.com/huggingface/datasets) – For dataset creation and management.
-
-*You may create a `requirements.txt` file containing:*
-```
-pillow
-datasets
-```
+**Dependencies include:**
+- [Pillow](https://python-pillow.org/) – For image processing and rendering
+- [NumPy](https://numpy.org/) - For numerical operations
+- [OpenCV](https://opencv.org/) - For image processing and augmentation
+- [Transformers](https://huggingface.co/docs/transformers/index) - For model integration
+- [Datasets](https://github.com/huggingface/datasets) – For dataset creation and management
 
 ## Usage
 
