@@ -249,6 +249,7 @@ def main():
         
         return {"accuracy": accuracy}
 
+    # Initialize the Trainer without the invalid 'label_names' argument
     trainer = Trainer(
         model=model,
         train_dataset=train_ds,
@@ -256,29 +257,31 @@ def main():
         data_collator=partial(collate_fn, processor=processor, dtype=DTYPE),
         args=training_args,
         compute_metrics=compute_metrics,
-        label_names=["labels"],
     )
 
-    # 8. Launch training.
+    # Manually set the label_names attribute to specify that the labels are under the "labels" key
+    trainer.label_names = ["labels"]
+
+    # Proceed with training
     torch.cuda.empty_cache()
     logger.info(f"VRAM before training: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
     trainer.train()
     logger.info(f"Max VRAM during training: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
 
-    # 9. Evaluate on the test dataset.
+    # Evaluate on the test dataset
     results = trainer.predict(test_ds)
     logger.info(f"Test results: {results.metrics}")
 
-    # 10. Get the best checkpoint path and push to Hub
+    # Get the best checkpoint path and push to Hub
     best_ckpt_path = trainer.state.best_model_checkpoint
     logger.info(f"Best checkpoint path: {best_ckpt_path}")
     
-    # Push the best model to the Hub
-    #trainer.push_to_hub(
-    #    repo_name=CONFIG["repo_name"],  
-    #    commit_message=f"Best model checkpoint - Accuracy: {results.metrics['accuracy']:.4f}",
-    #    blocking=True  
-    #)
+    # Push the best model to the Hub (uncomment when ready)
+    # trainer.push_to_hub(
+    #     repo_name=CONFIG["repo_name"],  
+    #     commit_message=f"Best model checkpoint - Accuracy: {results.metrics['accuracy']:.4f}",
+    #     blocking=True  
+    # )
 
     logger.info("Model successfully pushed to Hub!")
 
