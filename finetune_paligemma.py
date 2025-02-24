@@ -1,313 +1,222 @@
-import logging
-import uuid
-from functools import partial
-from typing import List, Dict, Any
-
 import numpy as np
 import torch
 from datasets import load_dataset, Dataset
+from transformers import Trainer, TrainingArguments, PaliGemmaProcessor, PaliGemmaForConditionalGeneration
 from peft import get_peft_model, LoraConfig
+from transformers import BitsAndBytesConfig
 
-from transformers import (
-    PaliGemmaProcessor,
-    PaliGemmaForConditionalGeneration,
-    TrainingArguments,
-    Trainer,
-    BitsAndBytesConfig
-)
+# Set device to GPU if available
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-logger = logging.getLogger(__name__)
+# Model and output configurations
+MODEL_ID = "google/paligemma2-3b-pt-448"
+OUTPUT_DIR = "Paligemma2-3B-448-UK-Car-VRN"
+DATASET_NAME = "spawn99/UK-Car-Plate-VRN-Dataset"
+HUB_MODEL_ID = "spawn99/Paligemma2-3B-448-UK-Car-VRN"
 
-
-def collate_fn(examples: List[Dict[str, Any]],
-               processor: PaliGemmaProcessor,
-               dtype: torch.dtype) -> Dict[str, torch.Tensor]:
+def load_and_prepare_dataset(subset_ratio=1.0):
     """
-    Collate function that processes the examples and sends floating-point tensors (like
-    pixel_values) to the model's dtype while leaving integer tensors (like labels) as is.
-    """
-    # Depending on your dataset, you may want to build a prompt here.
-    texts = ["<image>ocr\n" for _ in examples]
-    labels = [example["label"] for example in examples]
-    images = [example["image"] for example in examples]
+    Loads and flattens the UK Car Plate VRN dataset from Hugging Face for augmented images only.
+    Optionally sub-sample the dataset to a subset for quick testing.
     
-    # Process the data with the processor.
-    tokens = processor(
-        text=texts,
-        images=images,
-        suffix=labels,
-        return_tensors="pt",
-        padding="longest"
-    )
+    Parameters:
+        subset_ratio (float): The fraction of the dataset to use (default is 1.0 for 100%).
     
-    # Do not move tensors to GPU here. The Trainer will handle moving data to the proper device.
-    if "pixel_values" in tokens:
-        tokens["pixel_values"] = tokens["pixel_values"].to(dtype)
-    if "labels" in tokens:
-        tokens["labels"] = tokens["labels"].long()
-    
-    return tokens
-
-def prepare_datasets(ds: Dataset) -> tuple[Dataset, Dataset, Dataset]:
-    """
-    Prepare and split datasets for training, validation and testing.
-    
-    Args:
-        ds: Raw dataset from hub
-        
     Returns:
-        Tuple of (train_dataset, val_dataset, test_dataset)
+        train_ds, valid_ds, test_ds: The training, validation, and test dataset splits.
     """
-    # Convert each row into two examples (one per augmented image)
-    def split_augmented(example):
-        results = []
-        for img_type, img in enumerate((
-            example.get("augmented_front_plate"),
-            example.get("augmented_rear_plate")
-        )):
-            if img is not None:
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-                results.append({
-                    "image": img, 
-                    "label": example["vrn"],
-                    "image_type": "front" if img_type == 0 else "rear"
+    # Load the raw dataset (assumed to be on the Hub)
+    raw_ds = load_dataset(DATASET_NAME, split="train")
+    
+    # Only consider augmented image fields
+    samples = []
+    image_fields = ["augmented_front_plate", "augmented_rear_plate"]
+    for record in raw_ds:
+        for field in image_fields:
+            if record[field] is not None:
+                samples.append({
+                    "image": record[field],
+                    "prompt": "ocr",  # our task is OCR
+                    "target": record["vrn"]
                 })
-        return results
-
-    # Create flattened dataset
-    flattened_data = []
-    for example in ds:
-        flattened_data.extend(split_augmented(example))
-
-    ds_aug = Dataset.from_dict({
-        "image": [x["image"] for x in flattened_data],
-        "label": [x["label"] for x in flattened_data]
-    })
-
-    # Split ratios
-    total_examples = len(ds_aug)
-    train_size = int(0.7 * total_examples)
-    val_size = int(0.15 * total_examples)
     
-    # Split dataset
-    ds_aug = ds_aug.shuffle(seed=42)
-    train_ds = ds_aug.select(range(0, train_size))
-    val_ds = ds_aug.select(range(train_size, train_size + val_size))
-    test_ds = ds_aug.select(range(train_size + val_size, total_examples))
+    # Create a new Hugging Face Dataset from these samples and shuffle it
+    ds = Dataset.from_list(samples)
+    ds = ds.shuffle(seed=42)
     
-    # Validate splits
-    for name, dataset in [
-        ("training", train_ds),
-        ("validation", val_ds),
-        ("test", test_ds)
-    ]:
-        logger.info(f"{name.capitalize()} dataset size: {len(dataset)}")
-        if len(dataset) == 0:
-            raise ValueError(f"{name} dataset is empty!")
+    # Optionally use a subset of the dataset for testing purposes
+    if subset_ratio < 1.0:
+        subset_size = int(len(ds) * subset_ratio)
+        ds = ds.select(range(subset_size))
+    
+    # Split the dataset into train (70%), validation (20%), and test (10%)
+    ds_train_temp = ds.train_test_split(test_size=0.3, seed=42)
+    train_ds = ds_train_temp["train"]
+    temp_ds = ds_train_temp["test"]
+    
+    # Out of the remaining 30%, use 2/3 for validation (~20%) and 1/3 for test (~10%)
+    temp_split = temp_ds.train_test_split(test_size=0.3333, seed=42)
+    valid_ds = temp_split["train"]
+    test_ds = temp_split["test"]
+    
+    return train_ds, valid_ds, test_ds
 
-    # Add cleanup
-    ds_aug = ds_aug.cleanup_cache_files()
+def collate_fn(batch):
+    """
+    Custom collate function to prepare a batch of examples.
+    
+    For each example we:
+      - Prepend the required <image> token to the prompt (resulting in "<image> ocr")
+      - Encode the text and image inputs using the processor.
+      - Tokenize the target (VRN) text into labels.
+    """
+    images = [sample["image"] for sample in batch]
+    # Prepend the "<image>" token as required by PaLiGemma's formatting.
+    prompts = ["<image> " + sample["prompt"] for sample in batch]  # results in "<image> ocr"
+    targets = [sample["target"] for sample in batch]
+    
+    # Process inputs (the processor handles image and text encoding)
+    inputs = processor(text=prompts, images=images, return_tensors="pt", padding="longest", truncation=True)
+    
+    # Tokenize the target texts for labels
+    with processor.as_target_processor():
+        labels = processor.tokenizer(targets, return_tensors="pt", padding="longest", truncation=True).input_ids
+    inputs["labels"] = labels.to(DEVICE)
+    
+    # Move the entire input batch to the target device
+    inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
+    return inputs
 
-    return train_ds, val_ds, test_ds
+def compute_metrics(eval_preds):
+    """
+    Computes exact-match accuracy for OCR.
+    
+    It decodes both predictions and labels and then checks how many predictions match the target exactly.
+    """
+    preds, labels = eval_preds
+    # Replace any -100 (ignore index) with the pad token id for proper decoding.
+    labels = np.where(labels != -100, labels, processor.tokenizer.pad_token_id)
+    decoded_preds = processor.tokenizer.batch_decode(preds, skip_special_tokens=True)
+    decoded_labels = processor.tokenizer.batch_decode(labels, skip_special_tokens=True)
+    
+    # Compute exact match accuracy
+    exact_matches = [pred.strip() == label.strip() for pred, label in zip(decoded_preds, decoded_labels)]
+    accuracy = np.mean(exact_matches)
+    return {"exact_match_accuracy": accuracy}
 
 def main():
-    # Configuration
-    CONFIG = {
-        "model_id": "google/paligemma2-3b-pt-448",
-        "batch_size":8,
-        "num_epochs": 1,
-        "gradient_accumulation_steps": 1,
-        "learning_rate": 1e-5,
-        "lora_rank": 8,
-        "lora_dropout": 0.1,
-        "output_dir": "Paligemma2-3B-448-UK-Car-VRN",
-        "repo_name": "UK-Car-Plate-OCR-PaLiGemma",
-        "use_4bit": True,         # Enable 4-bit quantization with bitsandbytes
-        "bnb_quant_type": "nf4",    # Optional quantization type (default "nf4")
-    }
-
-    import os  # Added import if not already present
-    # Use LOCAL_RANK from the environment to set the correct GPU for each process.
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    global processor
+    # -------------------------------------------------------
+    # Load the PaLiGemma processor.
+    # -------------------------------------------------------
+    processor = PaliGemmaProcessor.from_pretrained(MODEL_ID)
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # -------------------------------------------------------
+    # Configure 4-bit quantization via BitsAndBytes.
+    # -------------------------------------------------------
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16
+    )
     
-    # Add this before model loading
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
+    # -------------------------------------------------------
+    # Load the pre-trained PaLiGemma model using 4-bit quantization.
+    # -------------------------------------------------------
+    model = PaliGemmaForConditionalGeneration.from_pretrained(
+        MODEL_ID,
+        device_map="auto",
+        quantization_config=bnb_config,
+        torch_dtype=torch.bfloat16
+    )
     
-    # Load and prepare datasets
-    ds = load_dataset("spawn99/UK-Car-Plate-VRN-Dataset", split="train")
-    train_ds, val_ds, test_ds = prepare_datasets(ds)
-    
-    # Initialize processor
-    processor = PaliGemmaProcessor.from_pretrained(CONFIG["model_id"])
-    
-    # Load model with optional bitsandbytes 4-bit quantization
-    if CONFIG.get("use_4bit", False):
-        # Setup BitsAndBytes configuration for 4-bit quantization
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type=CONFIG.get("bnb_quant_type", "nf4"),
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-        )
-        model = PaliGemmaForConditionalGeneration.from_pretrained(
-            CONFIG["model_id"],
-            attn_implementation="eager",
-            quantization_config=bnb_config,
-            torch_dtype=torch.bfloat16,
-            # Ensure the model is loaded onto the correct GPU by using LOCAL_RANK.
-            device_map={"": f"cuda:{local_rank}"}
-        )
-    else:
-        model = PaliGemmaForConditionalGeneration.from_pretrained(
-            CONFIG["model_id"],
-            attn_implementation="eager"
-        )
-    
-    # Freeze parts of vision_tower, multi_modal_projector, etc.
-    for param in model.vision_tower.parameters():
-        param.requires_grad = False
-    
-    for param in model.multi_modal_projector.parameters():
-        param.requires_grad = False
-
-    # Log model layer type (for debugging)
-    layer = None
-    if hasattr(model, "language_model"):
-        language_model = model.language_model
-        if hasattr(language_model, "model") and hasattr(language_model.model, "layers"):
-            layer = language_model.model.layers[0]
-        elif hasattr(language_model, "decoder") and hasattr(language_model.decoder, "layers"):
-            layer = language_model.decoder.layers[0]
-        elif hasattr(language_model, "transformer") and hasattr(language_model.transformer, "h"):
-            layer = language_model.transformer.h[0]
-
-    if layer is not None:
-        logger.info(f"Model layer type: {type(layer)}")
-    else:
-        logger.warning("Unable to log model layer type: no recognized layer attribute found.")
-    
-    # Setup LoRA configuration and wrap the model (works with both 4-bit and full precision)
+    # -------------------------------------------------------
+    # Set up LoRA for efficient fine-tuning.
+    # -------------------------------------------------------
     lora_config = LoraConfig(
-        r=CONFIG["lora_rank"],
+        r=8,
         target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"],
-        task_type="CAUSAL_LM",
+        task_type="CAUSAL_LM"
     )
     model = get_peft_model(model, lora_config)
-    model.print_trainable_parameters()
     
-    # Adjust learning rate for LoRA
-    LEARNING_RATE = CONFIG["learning_rate"]
-
-    model.train()  
-    DTYPE = model.dtype
-
-    # 6. Setup the training arguments using a cosine scheduler.
-    run_id = str(uuid.uuid4())[:8]
+    # -------------------------------------------------------
+    # Freeze the vision encoder layers to reduce the number of trainable parameters.
+    # -------------------------------------------------------
+    if hasattr(model, "vision_tower"):
+        for param in model.vision_tower.parameters():
+            param.requires_grad = False
+    if hasattr(model, "multi_modal_projector"):
+        for param in model.multi_modal_projector.parameters():
+            param.requires_grad = False
     
-    # Calculate total training steps (using floor division)
-    num_training_steps = (len(train_ds) // CONFIG["batch_size"]) * CONFIG["num_epochs"]
-    warmup_steps = num_training_steps // 15
-
-    # Calculate steps for saves and evaluations
-    save_steps = num_training_steps // 10  # 10 saves total
-
-    # Ensure save_steps is even to allow eval_steps = save_steps/2 exactly
-    if save_steps % 2 != 0:
-        save_steps += 1
-
-    eval_steps = save_steps // 2  # Evaluate twice as frequently as saving
+    model.to(DEVICE)
     
-    logger.info(f"Total training steps: {num_training_steps}")
-    logger.info(f"Saving every {save_steps} steps")
-    logger.info(f"Evaluating every {eval_steps} steps")
-
+    # -------------------------------------------------------
+    # Prepare the dataset with just 10% of the available samples for testing
+    # -------------------------------------------------------
+    train_ds, valid_ds, test_ds = load_and_prepare_dataset(subset_ratio=0.1)
+    
+    # -------------------------------------------------------
+    # Define training hyperparameters.
+    # -------------------------------------------------------
     training_args = TrainingArguments(
-        num_train_epochs=CONFIG["num_epochs"],
-        remove_unused_columns=False,
-        warmup_steps=warmup_steps,
-        learning_rate=LEARNING_RATE,
-        weight_decay=1e-5,
-        logging_steps=eval_steps,
-        save_strategy="steps",
-        save_steps=save_steps,
-        save_total_limit=5,
-        output_dir=CONFIG["output_dir"],
-        max_grad_norm=0.3,
-        bf16=True,
-        report_to=["wandb"],
-        run_name=f"paligemma-vrn-{run_id}",
+        output_dir=OUTPUT_DIR,
+        num_train_epochs=3,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=4,
         eval_strategy="steps",
-        eval_steps=eval_steps,
-        dataloader_pin_memory=False,
-        lr_scheduler_type="cosine",
-        optim="adamw_8bit",
-        dataloader_num_workers=4,
-        load_best_model_at_end=True,
-        metric_for_best_model="accuracy",
-        greater_is_better=True,
-        per_device_train_batch_size=CONFIG["batch_size"],
-        per_device_eval_batch_size=CONFIG["batch_size"],
-        gradient_accumulation_steps=CONFIG["gradient_accumulation_steps"],
-        eval_accumulation_steps=1,
-        gradient_checkpointing=True,
+        save_strategy="steps",
+        eval_steps=20,
+        save_steps=20,
+        logging_steps=100,
+        learning_rate=5e-5,
+        optim="adamw_torch",
+        weight_decay=1e-6,
+        adam_beta2=0.999,
+        warmup_steps=5,
+        save_total_limit=1,
+        remove_unused_columns=False,
+        bf16=True,
     )
-
-     # Define a custom compute_metrics function to track evaluation metrics
     
-    def compute_metrics(eval_pred):
-        logits, labels = eval_pred
-        # Compute predictions using argmax over the logits
-        predictions = np.argmax(logits, axis=-1)
-        
-        # Create a mask to ignore label values (e.g. -100 for padded tokens)
-        mask = labels != -100
-        total = mask.sum()
-        if total == 0:
-            accuracy = 0.0
-        else:
-            accuracy = (predictions[mask] == labels[mask]).mean()
-        
-        return {"accuracy": accuracy}
-
-    # Initialize the Trainer without the invalid 'label_names' argument
+    # -------------------------------------------------------
+    # Initialize the Trainer.
+    # -------------------------------------------------------
     trainer = Trainer(
         model=model,
-        train_dataset=train_ds,
-        eval_dataset=val_ds,
-        data_collator=partial(collate_fn, processor=processor, dtype=DTYPE),
         args=training_args,
+        train_dataset=train_ds,
+        eval_dataset=valid_ds,
+        data_collator=collate_fn,
         compute_metrics=compute_metrics,
     )
-
-    # Manually set the label_names attribute to specify that the labels are under the "labels" key
-    trainer.label_names = ["labels"]
-
-    # Proceed with training
-    torch.cuda.empty_cache()
-    logger.info(f"VRAM before training: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
-    trainer.train()
-    logger.info(f"Max VRAM during training: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
-
-    # Evaluate on the test dataset
-    results = trainer.predict(test_ds)
-    logger.info(f"Test results: {results.metrics}")
-
-    # Get the best checkpoint path and push to Hub
-    best_ckpt_path = trainer.state.best_model_checkpoint
-    logger.info(f"Best checkpoint path: {best_ckpt_path}")
     
-    # Push the best model to the Hub (uncomment when ready)
-    # trainer.push_to_hub(
-    #     repo_name=CONFIG["repo_name"],  
-    #     commit_message=f"Best model checkpoint - Accuracy: {results.metrics['accuracy']:.4f}",
-    #     blocking=True  
-    # )
+    # -------------------------------------------------------
+    # Start training.
+    # -------------------------------------------------------
+    trainer.train()
+    
+    # Evaluate on the validation set.
+    eval_results = trainer.evaluate()
+    print("Validation Results:", eval_results)
+    
+    # Optionally, evaluate on the test set.
+    test_results = trainer.evaluate(test_ds)
+    print("Test Results:", test_results)
+    
+    # -------------------------------------------------------
+    # Save the final trained model and processor.
+    # -------------------------------------------------------
+    trainer.save_model(OUTPUT_DIR)
+    processor.save_pretrained(OUTPUT_DIR)
+    
+    # -------------------------------------------------------
+    # Push the final model and processor to the Hugging Face Hub.
+    # -------------------------------------------------------
+    #model.push_to_hub(HUB_MODEL_ID, use_auth_token=True)
+    #processor.push_to_hub(HUB_MODEL_ID, use_auth_token=True)
+    #print(f"Model and processor pushed to: https://huggingface.co/{HUB_MODEL_ID}")
 
-    logger.info("Model successfully pushed to Hub!")
-
-if __name__ == '__main__':
-    main() 
+if __name__ == "__main__":
+    main()
