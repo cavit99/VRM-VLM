@@ -186,8 +186,6 @@ def main():
         label_names=["labels"],
         dataloader_pin_memory=False,
         dataloader_num_workers=2,
-        predict_with_generate=False,  # Disable generation during evaluation to save memory
-        generation_max_length=20,     # Set a reasonable max length for generation if needed
         eval_accumulation_steps=4,    # Process evaluation predictions in smaller chunks
     )
     
