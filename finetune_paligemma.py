@@ -19,16 +19,20 @@ from transformers import (
 logger = logging.getLogger(__name__)
 
 
-def collate_fn(examples: List[Dict[str, Any]], processor: PaliGemmaProcessor, dtype: torch.dtype) -> Dict[str, torch.Tensor]:
+def collate_fn(examples: List[Dict[str, Any]],
+               processor: PaliGemmaProcessor,
+               device: torch.device,
+               dtype: torch.dtype) -> Dict[str, torch.Tensor]:
     """
-    Collate function that now assumes images have been preprocessed to RGB,
-    reducing redundant work during training.
+    Collate function that processes the examples and sends floating-point tensors (like
+    pixel_values) to the model's dtype while leaving integer tensors (like labels) as is.
     """
+    # Depending on your dataset, you may want to build a prompt here.
     texts = ["<image>ocr\n" for _ in examples]
     labels = [example["label"] for example in examples]
-    # Directly use the preprocessed image
     images = [example["image"] for example in examples]
     
+    # Process the data with the processor.
     tokens = processor(
         text=texts,
         images=images,
@@ -36,7 +40,19 @@ def collate_fn(examples: List[Dict[str, Any]], processor: PaliGemmaProcessor, dt
         return_tensors="pt",
         padding="longest"
     )
-    return tokens.to(dtype)
+    
+    # Send tensors to the device.
+    tokens = {key: tensor.to(device) for key, tensor in tokens.items()}
+    
+    # Convert only the pixel_values (if present) to the desired dtype.
+    if "pixel_values" in tokens:
+        tokens["pixel_values"] = tokens["pixel_values"].to(dtype)
+    
+    # Ensure that label tensors remain as integers.
+    if "labels" in tokens:
+        tokens["labels"] = tokens["labels"].long()
+    
+    return tokens
 
 def prepare_datasets(ds: Dataset) -> tuple[Dataset, Dataset, Dataset]:
     """
@@ -89,7 +105,7 @@ def prepare_datasets(ds: Dataset) -> tuple[Dataset, Dataset, Dataset]:
     # Validate splits
     for name, dataset in [
         ("training", train_ds),
-        ("validation", val_ds),
+        ("validation", val_ds),i
         ("test", test_ds)
     ]:
         logger.info(f"{name.capitalize()} dataset size: {len(dataset)}")
@@ -268,7 +284,7 @@ def main():
         model=model,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        data_collator=partial(collate_fn, processor=processor, dtype=DTYPE),
+        data_collator=partial(collate_fn, processor=processor, device=device, dtype=DTYPE),
         args=training_args,
         compute_metrics=compute_metrics,
     )
