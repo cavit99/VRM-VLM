@@ -165,54 +165,50 @@ def main():
     logger.info(f"Evaluating every {eval_steps} steps")
 
     training_args = TrainingArguments(
-num_train_epochs=CONFIG["num_epochs"],
-    remove_unused_columns=False,
-    warmup_steps=warmup_steps,
-    learning_rate=LEARNING_RATE,
-    weight_decay=1e-5,
-    logging_steps=eval_steps,
-    save_strategy="steps",
-    save_steps=save_steps,
-    save_total_limit=5,
-    output_dir=CONFIG["output_dir"],
-    max_grad_norm=1.0,
-    bf16=True,
-    report_to=["wandb"],
-    run_name=f"paligemma-vrn-{run_id}",
-    eval_strategy="steps",
-    eval_steps=eval_steps,
-    dataloader_pin_memory=False,
-    lr_scheduler_type="cosine",
-    optim="paged_adamw_8bit", 
-    dataloader_num_workers=4,
-    load_best_model_at_end=True,
-    metric_for_best_model="sequence_accuracy",
-    greater_is_better=True,
-    per_device_train_batch_size=CONFIG["batch_size"],  
-    per_device_eval_batch_size=CONFIG["batch_size"],   
-    eval_accumulation_steps=4
+        num_train_epochs=CONFIG["num_epochs"],
+        remove_unused_columns=False,
+        warmup_steps=warmup_steps,
+        learning_rate=LEARNING_RATE,
+        weight_decay=1e-5,
+        logging_steps=eval_steps,
+        save_strategy="steps",
+        save_steps=save_steps,
+        save_total_limit=5,
+        output_dir=CONFIG["output_dir"],
+        max_grad_norm=1.0,
+        bf16=True,
+        report_to=["wandb"],
+        run_name=f"paligemma-vrn-{run_id}",
+        eval_strategy="steps",
+        eval_steps=eval_steps,
+        dataloader_pin_memory=False,
+        lr_scheduler_type="cosine",
+        optim="paged_adamw_8bit", 
+        dataloader_num_workers=4,
+        load_best_model_at_end=True,
+        metric_for_best_model="accuracy",
+        greater_is_better=True,
+        per_device_train_batch_size=CONFIG["batch_size"],  
+        per_device_eval_batch_size=CONFIG["batch_size"],   
+        eval_accumulation_steps=4
     )
 
      # Define a custom compute_metrics function to track evaluation metrics
+    import numpy as np
     def compute_metrics(eval_pred):
-        predictions = eval_pred.predictions
-        labels = eval_pred.label_ids
+        logits, labels = eval_pred
+        # Compute predictions using argmax over the logits
+        predictions = np.argmax(logits, axis=-1)
         
-        if len(predictions) != len(labels):
-            raise ValueError(f"Mismatch: {len(predictions)} predictions vs {len(labels)} labels")
+        # Create a mask to ignore label values (e.g. -100 for padded tokens)
+        mask = labels != -100
+        total = mask.sum()
+        if total == 0:
+            accuracy = 0.0
+        else:
+            accuracy = (predictions[mask] == labels[mask]).mean()
         
-        # Batch decode
-        decoded_predictions = processor.batch_decode(predictions, skip_special_tokens=True)
-        decoded_labels = processor.batch_decode(labels, skip_special_tokens=True)
-        
-        # Postprocess
-        processed_predictions = [pred.replace("ocr\n", "").strip() for pred in decoded_predictions]
-        processed_labels = [lab.strip() for lab in decoded_labels]
-        
-        # Calculate accuracy
-        accuracy = sum(pred == lab for pred, lab in zip(processed_predictions, processed_labels)) / len(processed_predictions)
-        
-        return {"sequence_accuracy": accuracy}
+        return {"accuracy": accuracy}
 
     trainer = Trainer(
         model=model,
