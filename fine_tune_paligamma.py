@@ -8,6 +8,7 @@ from transformers import (
 )
 from PIL import Image
 import os
+import uuid
 
 # Define a custom Trainer that applies layer-specific learning rates.
 class CustomTrainer(Trainer):
@@ -155,6 +156,9 @@ def main():
     print(f"Decay steps: {decay_steps}")
     print(f"Stable steps: {stable_steps}")
 
+    # Generate a short UUID (first 8 characters)
+    run_id = str(uuid.uuid4())[:8]
+
     training_args = TrainingArguments(
         num_train_epochs=num_epochs,
         remove_unused_columns=False,
@@ -172,7 +176,7 @@ def main():
         label_smoothing_factor=0.1,    
         bf16=True,
         report_to=["wandb"],
-        run_name="paligemma-vrn-finetune",
+        run_name=f"paligemma-vrn-finetune-{run_id}",
         eval_strategy="steps",
         eval_steps=500,
         dataloader_pin_memory=False,
