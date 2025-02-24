@@ -176,7 +176,7 @@ def main():
         per_device_eval_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,
-        learning_rate=2e-5,
+        learning_rate=2.5e-5,
         weight_decay=0.01,
         logging_steps=eval_steps,
         save_strategy="steps",
@@ -198,7 +198,6 @@ def main():
         load_best_model_at_end=True,
         metric_for_best_model="accuracy",
         greater_is_better=True,
-        eval_accumulation_steps=2,
     )
 
     # Define a custom compute_metrics function to track evaluation metrics
