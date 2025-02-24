@@ -77,6 +77,10 @@ def collate_fn(batch):
         padding="longest"
     )
     
+    # Ensure that 'labels' field exists for loss computation
+    if "labels" not in inputs and "input_ids" in inputs:
+        inputs["labels"] = inputs["input_ids"].clone()
+    
     # Do not move the data to GPU here.
     return inputs
 
@@ -218,6 +222,20 @@ def main():
     #model.push_to_hub(HUB_MODEL_ID, use_auth_token=True)
     #processor.push_to_hub(HUB_MODEL_ID, use_auth_token=True)
     #print(f"Model and processor pushed to: https://huggingface.co/{HUB_MODEL_ID}")
+
+    # After applying LoRA, check that we have trainable parameters
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Model has {trainable_params} trainable parameters")
+    
+    # If trainable_params is 0, explicitly mark LoRA parameters as trainable
+    if trainable_params == 0:
+        for name, param in model.named_parameters():
+            if 'lora' in name:
+                param.requires_grad = True
+        
+        # Check again
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"After fixing: Model has {trainable_params} trainable parameters")
 
 if __name__ == "__main__":
     main()
