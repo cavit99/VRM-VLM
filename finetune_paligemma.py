@@ -153,7 +153,11 @@ def main():
         param.requires_grad = False
 
     # Log model layer type (for debugging)
-    logger.info(f"Model layer type: {type(model.model.layers[0])}")
+    if hasattr(model, "model"):
+        layer = model.model.layers[0]
+    else:
+        layer = model.layers[0]
+    logger.info(f"Model layer type: {type(layer)}")
     
     # Setup LoRA configuration and wrap the model (works with both 4-bit and full precision)
     lora_config = LoraConfig(
