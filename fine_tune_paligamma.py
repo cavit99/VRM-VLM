@@ -20,6 +20,12 @@ class CustomTrainer(Trainer):
         ])
 
 def main():
+    # Memory and CUDA optimizations
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda":
+        torch.backends.cudnn.benchmark = True
+        torch.cuda.empty_cache()
+
     # Reduce batch size to help with memory issues
     BATCH_SIZE = 8  
     num_epochs = 20
@@ -100,16 +106,40 @@ def main():
     print(f"Validation dataset size: {len(val_ds)}")
     print(f"Test dataset size: {len(test_ds)}")
     
+    # Pre-process images before training
+    print("Pre-processing training images...")
+    train_ds = train_ds.map(
+        lambda x: {"image": x["image"].convert("RGB") if isinstance(x["image"], str) else x["image"]}, 
+        load_from_cache_file=False
+    )
+    print("Pre-processing validation images...")
+    val_ds = val_ds.map(
+        lambda x: {"image": x["image"].convert("RGB") if isinstance(x["image"], str) else x["image"]}, 
+        load_from_cache_file=False
+    )
+    test_ds = test_ds.map(
+        lambda x: {"image": x["image"].convert("RGB") if isinstance(x["image"], str) else x["image"]}, 
+        load_from_cache_file=False
+    )
+
     # 4. Load the model and processor
     model_id = "google/paligemma2-3b-pt-448"
     processor = PaliGemmaProcessor.from_pretrained(model_id)
     
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     model = PaliGemmaForConditionalGeneration.from_pretrained(
         model_id,
-        torch_dtype=torch.bfloat16  # or use 'torch.float16' if bf16 isn't available.
+        torch_dtype=torch.bfloat16
     ).to(device)
-    
+
+    # Warmup pass to initialize CUDA
+    print("Performing CUDA warmup pass...")
+    dummy_input = processor(
+        text=["<image>ocr\n"], 
+        images=[Image.new("RGB", (448,448))],
+        return_tensors="pt"
+    ).to(device)
+    model.generate(**dummy_input, max_new_tokens=20)
+
     model.train()  # Unfreeze entire model.
     DTYPE = model.dtype
 
@@ -174,13 +204,14 @@ def main():
         run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
         eval_steps=500,
-        dataloader_pin_memory=False,
+        dataloader_pin_memory=True,
         lr_scheduler_type="warmup_stable_decay",
         lr_scheduler_kwargs={
             "num_decay_steps": decay_steps,
             "num_stable_steps": stable_steps,
             "min_lr_ratio": 0.1
-        }
+        },
+        dataloader_num_workers=4
     )
 
     # 7. Initialize the custom Trainer with training and evaluation datasets.
