@@ -57,10 +57,11 @@ def main():
         torch.cuda.empty_cache()
         torch.set_float32_matmul_precision('high')  # Enable TF32 for better performance
 
-    # Reduce batch size to help with memory issues
-    BATCH_SIZE = 8  
+    # Reduce batch size and number of workers to help with memory issues
+    BATCH_SIZE = 4  # Reduced from 8
     num_epochs = 20
-    gradient_accumulation_steps = 1
+    gradient_accumulation_steps = 2  # Increased to maintain effective batch size
+    num_workers = 2  # Reduced number of workers
 
     # 1. Load the dataset from the Hub.
     # The dataset was previously created with create_dataset.py.
@@ -219,7 +220,7 @@ def main():
         num_train_epochs=num_epochs,
         remove_unused_columns=False,
         per_device_train_batch_size=BATCH_SIZE,
-        gradient_accumulation_steps=gradient_accumulation_steps,  
+        gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,  
         weight_decay=1e-6,
         adam_beta2=0.999,
@@ -235,14 +236,14 @@ def main():
         run_name=f"paligemma-vrn-{run_id}",
         eval_strategy="steps",
         eval_steps=500,
-        dataloader_pin_memory=True,
+        dataloader_pin_memory=False,  # Disabled pin_memory to reduce memory usage
         lr_scheduler_type="warmup_stable_decay",
         lr_scheduler_kwargs={
             "num_decay_steps": decay_steps,
             "num_stable_steps": stable_steps,
             "min_lr_ratio": 0.1
         },
-        dataloader_num_workers=4
+        dataloader_num_workers=num_workers,  # Reduced number of workers
     )
 
     # 7. Initialize the custom Trainer with training and evaluation datasets.
