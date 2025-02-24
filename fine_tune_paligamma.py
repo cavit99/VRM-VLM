@@ -9,6 +9,8 @@ from transformers import (
 from PIL import Image
 import os
 import uuid
+import datetime
+import logging
 
 # Define a custom Trainer that applies layer-specific learning rates.
 class CustomTrainer(Trainer):
@@ -49,14 +51,30 @@ class CollateWrapper:
         return collate_fn(examples, self.processor, self.device, self.dtype)
 
 def main():
-    # Add detection of world size (number of GPUs)
-    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    # Initialize process group with better error handling
     local_rank = int(os.environ.get("LOCAL_RANK", -1))
-    
-    # Initialize distributed training
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+
     if local_rank != -1:
-        torch.distributed.init_process_group(backend="nccl")
-        torch.cuda.set_device(local_rank)
+        try:
+            torch.distributed.init_process_group(
+                backend="nccl",
+                init_method="env://",
+                timeout=datetime.timedelta(minutes=15)
+            )
+            torch.cuda.set_device(local_rank)
+            print(f"Initialized process group for rank {local_rank} of {world_size}")
+        except Exception as e:
+            print(f"Failed to initialize distributed training: {str(e)}")
+            raise
+
+    # Add these imports at the top
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+    # Move BATCH_SIZE definition to top of main()
+    BATCH_SIZE = 4
     
     # Adjust device assignment
     device = torch.device("cuda", local_rank) if torch.cuda.is_available() else "cpu"
@@ -76,7 +94,6 @@ def main():
         torch.set_float32_matmul_precision('high')  # Enable TF32 for better performance
 
     # Adjust batch size for multi-GPU setup
-    BATCH_SIZE = 4  # Reduced per-GPU batch size (will be multiplied by number of GPUs)
     num_epochs = 20
     gradient_accumulation_steps = 1
     num_workers = min(4, os.cpu_count()//2)  # Workers per GPU
@@ -291,5 +308,12 @@ def main():
 
 
 if __name__ == '__main__':
-    torch.multiprocessing.set_sharing_strategy('file_system')
-    main() 
+    try:
+        torch.multiprocessing.set_sharing_strategy('file_system')
+        main()
+    except Exception as e:
+        print(f"Error in main: {str(e)}")
+        # Make sure to clean up distributed process group
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+        raise 
