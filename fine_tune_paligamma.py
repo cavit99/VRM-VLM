@@ -1,5 +1,9 @@
 import torch
 from datasets import load_dataset, Dataset
+import os
+# Set OpenMP threads before other imports
+os.environ["OMP_NUM_THREADS"] = "1"
+
 from transformers import (
     PaliGemmaProcessor,
     PaliGemmaForConditionalGeneration,
@@ -7,10 +11,8 @@ from transformers import (
     Trainer,
 )
 from PIL import Image
-import os
 import uuid
 import datetime
-import logging
 
 # Define a custom Trainer that applies layer-specific learning rates.
 class CustomTrainer(Trainer):
