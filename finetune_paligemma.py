@@ -126,6 +126,7 @@ def main():
         attn_implementation="eager"
     )
     
+    logger.info(f"Model layer type: {type(model.model.layers[0])}")  # Should output <class '...GemmaDecoderLayer'>
 
     # Setup LoRA
     lora_config = LoraConfig(
@@ -220,9 +221,9 @@ def main():
 
     # 8. Launch training.
     torch.cuda.empty_cache()
-    print(f"VRAM before training: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+    logger.info(f"VRAM before training: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
     trainer.train()
-    print(f"Max VRAM during training: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
+    logger.info(f"Max VRAM during training: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
 
     # 9. Evaluate on the test dataset.
     results = trainer.predict(test_ds)
