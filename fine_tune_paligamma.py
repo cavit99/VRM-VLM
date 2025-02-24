@@ -41,10 +41,10 @@ def main():
     # Simplified device setup for single GPU
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Adjusted configurations for better memory usage
-    BATCH_SIZE = 4  # Increased from 2 since GPU has capacity
+    # Adjusted configurations for better GPU utilization
+    BATCH_SIZE = 8  # Increased from 4 to utilize more GPU memory
     num_epochs = 20
-    gradient_accumulation_steps = 2  # Increased to help with larger batch size
+    gradient_accumulation_steps = 1  # Reduced since we increased batch size
 
     # 1. Load the dataset from the Hub.
     # The dataset was previously created with create_dataset.py.
@@ -158,10 +158,10 @@ def main():
         num_train_epochs=num_epochs,
         remove_unused_columns=False,
         per_device_train_batch_size=BATCH_SIZE,
-        per_device_eval_batch_size=BATCH_SIZE,
+        per_device_eval_batch_size=BATCH_SIZE * 2,  # Increased eval batch size
         gradient_accumulation_steps=gradient_accumulation_steps,
         warmup_steps=warmup_steps,
-        learning_rate=2.5e-5,  # Slightly increased learning rate
+        learning_rate=2.5e-5,
         weight_decay=0.01,
         logging_steps=200,    
         save_strategy="epoch",
@@ -176,10 +176,11 @@ def main():
         dataloader_pin_memory=True,
         lr_scheduler_type="cosine",
         gradient_checkpointing=True,
-        group_by_length=False,
-        # Added memory optimizations
-        optim="adamw_torch_fused",  # Use fused optimizer
-        fp16_full_eval=True  # Memory efficient evaluation
+        group_by_length=True,  # Enable group by length for more efficient batching
+        optim="adamw_torch_fused",
+        fp16_full_eval=True,
+        dataloader_num_workers=4,  # Add multiple workers for data loading
+        torch_compile=True,  # Enable torch compile for potential speedup
     )
 
     trainer = Trainer(
