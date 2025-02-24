@@ -72,7 +72,7 @@ def main():
             raise
 
     # Move BATCH_SIZE definition to top of main()
-    BATCH_SIZE = 4
+    BATCH_SIZE = 2
     
     # Adjust device assignment
     device = torch.device("cuda", local_rank) if torch.cuda.is_available() else "cpu"
