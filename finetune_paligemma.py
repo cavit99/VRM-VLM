@@ -176,6 +176,7 @@ def main():
         remove_unused_columns=False,
         bf16=True,
         label_names=["labels"],
+        use_cache=False
     )
     
     # -------------------------------------------------------
