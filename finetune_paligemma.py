@@ -196,13 +196,23 @@ num_train_epochs=CONFIG["num_epochs"],
      # Define a custom compute_metrics function to track evaluation metrics
     def compute_metrics(eval_pred):
         predictions = eval_pred.predictions
-        labels = eval_pred.label_idsw
-        decoded_predictions = [processor.decode(pred, skip_special_tokens=True).replace("ocr\n", "").strip() for pred in predictions]
-        decoded_labels = [processor.decode(label, skip_special_tokens=True).strip() for label in labels]
-        accuracy = sum(p == l for p, l in zip(decoded_predictions, decoded_labels)) / len(decoded_predictions)
-        return {
-            "sequence_accuracy": accuracy
-        }
+        labels = eval_pred.label_ids
+        
+        if len(predictions) != len(labels):
+            raise ValueError(f"Mismatch: {len(predictions)} predictions vs {len(labels)} labels")
+        
+        # Batch decode
+        decoded_predictions = processor.batch_decode(predictions, skip_special_tokens=True)
+        decoded_labels = processor.batch_decode(labels, skip_special_tokens=True)
+        
+        # Postprocess
+        processed_predictions = [pred.replace("ocr\n", "").strip() for pred in decoded_predictions]
+        processed_labels = [lab.strip() for lab in decoded_labels]
+        
+        # Calculate accuracy
+        accuracy = sum(pred == lab for pred, lab in zip(processed_predictions, processed_labels)) / len(processed_predictions)
+        
+        return {"sequence_accuracy": accuracy}
 
     trainer = Trainer(
         model=model,
